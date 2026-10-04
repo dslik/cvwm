@@ -7,6 +7,8 @@ It does what cvwm needs and nothing it does not:
   * generates a TLS certificate for the hostname (the export origin rejects IP addresses, so a name is required);
   * checks the hostname resolves to this machine (it does not edit /etc/hosts and needs no root);
   * starts seedmi-dc (the reference domain controller: LDAP + OAuth + KDC) with a couple of users who have homes;
+    the root controller is also the deployment's OAuth authorization server (its [tokens] block), since a CDMI server
+    is not one and seedmi has run none of its own since 0.128 -- seedmi only verifies the tokens it issues;
   * starts seedmi with the discovery tree, the root domain resolved at the controller with a home_base, a home
     server, and an HTTP export that serves the cvwm desktop at /desktop/ on seedmi's own origin (same-origin, no CORS);
   * enables the NFS and SMB export servers at their default ports (NFSv4.1 on 2049, SMB on 445) so NFS and SMB
@@ -380,8 +382,14 @@ class Setup:
         self.kms_port = 5696                 # KMIP
         self.dac_port = 9444                 # DAC provider HTTPS (distinct from seedmi's 9443)
         self.mcp_port = 8100                 # CDMI over MCP (revision 347): its own listener
-        self.oauth_port = 8101               # seedmi's built-in authorization server (issues MCP tokens)
-        self.oauth_client_id = "mcp-inspector"        # the client the MCP Inspector authenticates as (client_credentials)
+        # The domain controller is the deployment's OAuth authorization server since seedmi 0.128 (a CDMI server is not
+        # one, and the one seedmi ran for a demonstration is gone). The controller's HTTPS listener (dc_https_port)
+        # serves the token endpoint at /token, its keys at /jwks and its metadata at /.well-known/oauth-authorization-
+        # server; the issuer is that URL. seedmi verifies the tokens it issues with the public half of the controller's
+        # token-signing key.
+        self.dc_token_key = "dc-token-signing.key"    # the controller's token-signing private key (RSA -> RS256)
+        self.dc_token_pub = "dc-token-signing.pub"    # its public half, read by seedmi as [oauth].verify_key_file
+        self.oauth_client_id = "mcp-inspector"        # the OAuth client registered at the controller ([[client]])
         self.oauth_client_secret = secrets.token_urlsafe(24)   # its secret, generated per run
         self.dac_path = "/decide"
         self.kms_label = "primary"
@@ -547,10 +555,15 @@ class Setup:
         OUT.phase("Generate TLS certificates for the hostname and the controller")
         os.makedirs(self.pki, exist_ok=True)
         OUT.note("generating certificates in `%s` ..." % self.pki)
-        # A binding certificate for seedmi (SAN = the hostname) and one for the controller. The controller makes its
-        # own token-signing key at first start, so none is written here.
+        # A binding certificate for seedmi (SAN = the hostname) and one for the controller.
         self._gen_cert("binding", self.host, "DNS:%s" % self.host)
         self._gen_cert("dc", self.host, "DNS:%s,IP:127.0.0.1" % self.host)
+        # The controller is the deployment's OAuth authorization server since 0.128, so generate the RSA key it signs
+        # tokens with here: the private half goes into the controller's [tokens], the public half into seedmi's
+        # [oauth].verify_key_file. A PEM public key is RS256, which is what the controller signs an RSA key's tokens with.
+        tok_key = os.path.join(self.pki, self.dc_token_key)
+        run_cmd(["openssl", "genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048", "-out", tok_key])
+        run_cmd(["openssl", "rsa", "-in", tok_key, "-pubout", "-out", os.path.join(self.pki, self.dc_token_pub)])
 
         # KMS and DAC have their own PKI helpers (kms-pki.ts, dac-pki.ts) that build the CA/server/client and, for the
         # DAC, the provider and signing chain that must chain correctly. Use them so the trust is what each server
@@ -575,7 +588,7 @@ class Setup:
             # The listener certificate is self-signed, so what seedmi trusts to reach the provider is that cert itself.
             self._adopt(dac_pki, "https.crt", "dac-ca.crt")
 
-        made = ["a binding certificate", "a controller certificate"]
+        made = ["a binding certificate", "a controller certificate", "the controller's token-signing key"]
         if self.with_kms: made.append("KMS certificates")
         if self.with_dac: made.append("DAC certificates")
         OUT.did("wrote " + ", ".join(made) + " in %s" % self.pki)
@@ -600,9 +613,11 @@ class Setup:
         ("bob",     "bob",     ["agents"],         "/home/bob"),
     ]
 
-    def _write_dc_config(self, path, https_port, ldap_port, members, with_homes, header):
+    def _write_dc_config(self, path, https_port, ldap_port, members, with_homes, header, authz=False):
         """Write one controller config: the realm, a listener on the given ports, every group, and the [[user]]
-        entries for `members` (with homes only where with_homes, i.e. the root controller that serves sign-in)."""
+        entries for `members` (with homes only where with_homes, i.e. the root controller that serves sign-in). Where
+        authz, the controller is also the deployment's OAuth authorization server: a [tokens] block (so it serves
+        /token, /jwks and the RFC 8414 metadata) and the [[client]] the MCP client authenticates as."""
         pki = self.pki
         lines = ["# generated by setup-cvwm.py for %s" % self.host, "# " + header, "[realm]"]
         lines += toml_table([("name", self.realm), ("domain", self.domain_dns)])
@@ -629,6 +644,32 @@ class Setup:
             lines.append("[[user]]")
             lines += toml_table(fields)
             lines.append("")
+        if authz:
+            # This controller is the deployment's OAuth authorization server. [tokens] makes it serve the token
+            # endpoint, its JWK Set and the RFC 8414 metadata; the issuer is its own HTTPS URL (clients reach the
+            # controller there). seedmi verifies the tokens with the public half of this signing key.
+            lines.append("# OAuth authorization server for the realm: /token, keys at /jwks, metadata at")
+            lines.append("# /.well-known/oauth-authorization-server. seedmi (a CDMI server) issues no tokens itself.")
+            lines.append("[tokens]")
+            lines += toml_table([
+                ("issuer", "https://%s:%d/" % (self.host, https_port)),
+                ("signing_key_file", os.path.join(self.pki, self.dc_token_key)),
+                ("previous_keys", []),
+                ("lifetime_seconds", 3600),
+            ])
+            lines.append("")
+            # The client the MCP client (the desktop's mcpinspector app, or the external MCP Inspector) authenticates
+            # as. client_credentials issues a token whose subject is the client itself (mcp-inspector@REALM); password
+            # issues one that acts as the named user (alice/bob), so the object ACLs for that user then apply. The
+            # audience is the CDMI server's base URI; seedmi also accepts a token carrying the MCP endpoint's URI.
+            lines.append("[[client]]")
+            lines += toml_table([
+                ("id", self.oauth_client_id),
+                ("secret", self.oauth_client_secret),
+                ("grants", ["client_credentials", "password"]),
+                ("audiences", [self.base_uri]),
+            ])
+            lines.append("")
         self._write(path, lines)
         # Verify the controller config has the fields it needs before starting it: a [listen] table with an ldap_port
         # (without it dcd binds no LDAP port and seedmi's principal lookups never connect) and the cert/key files.
@@ -640,8 +681,8 @@ class Setup:
         # so all three users resolve here. Passwords are plaintext (development only).
         self._write_dc_config(
             os.path.join(self.run, "dc.toml"), self.dc_https_port, self.dc_ldap_port,
-            ["alice", "mallory", "bob"], with_homes=True,
-            header="root controller: all principals (alice administers, mallory orchestrates, bob is an agent), with homes")
+            ["alice", "mallory", "bob"], with_homes=True, authz=True,
+            header="root controller: all principals (alice administers, mallory orchestrates, bob is an agent), with homes; the deployment's OAuth authorization server")
         # A controller per sub-domain, serving only that sub-domain's members. Because it shares the realm and base,
         # the principals keep their names; because it lists only its members, a non-member (e.g. mallory at agents)
         # does not resolve there and so is not a principal of that domain. Homes are root-domain, so these omit them.
@@ -691,8 +732,10 @@ class Setup:
             ("base", self.base_dn),
             ("ca_file", os.path.join(pki, "dc.crt")),
             ("home_base", self.base_uri),
-            ("issuer", "https://%s:%d" % (self.host, self.oauth_port)),
-            ("audience", "https://%s:%d/mcp" % (self.host, self.mcp_port)),
+            # Bearer tokens for this domain's principals are verified against the keys this controller publishes (it is
+            # the authorization server); audience is the CDMI base URI the tokens are issued for.
+            ("issuer", "https://%s:%d/" % (self.host, self.dc_https_port)),
+            ("audience", self.base_uri),
         ])
         lines.append("")
         # Each sub-domain is resolved at its OWN controller instance (a distinct LDAP port), which shares this realm
@@ -700,6 +743,10 @@ class Setup:
         # membership: a principal absent from a sub-domain's controller does not resolve there, so it is not a
         # principal of that domain (mallory of orchestration, bob of agents, and neither of the other). What each
         # group may DO where is still set by [[group_privileges]] below, independently of membership.
+        # These sub-domain controllers resolve principals (LDAP) but are not authorization servers: only the root
+        # controller runs [tokens]. A [[domain_controller]] names an issuer and this server's audience both or neither,
+        # so these name neither; a bearer token's subject is a principal the root controller resolves in any case, and
+        # it is verified by [oauth] and the root [[domain_controller]] above.
         for sd in self.subdomains:
             lines.append("[[domain_controller]]")
             lines += toml_table([
@@ -709,8 +756,6 @@ class Setup:
                 ("base", self.base_dn),
                 ("ca_file", os.path.join(pki, "dc.crt")),
                 ("home_base", self.base_uri),
-                ("issuer", "https://%s:%d" % (self.host, self.oauth_port)),
-                ("audience", "https://%s:%d/mcp" % (self.host, self.mcp_port)),
             ])
             lines.append("")
         lines.append("# Privileges are granted to a group within a domain path. storage-admins administers the domains at")
@@ -785,12 +830,9 @@ class Setup:
                 ("ca_file", os.path.join(pki, "dac-ca.crt")),
             ]))
 
-        # The built-in authorization server (0.88) mints the tokens the MCP endpoint accepts. It authenticates against
-        # seedmi's own [[user]] list, and a token it issues names that user as its subject VERBATIM -- seedmi does not
-        # realm-qualify a token subject. Our principals are controller-resolved and realm-qualified (bob@REALM), and the
-        # ACLs and ownership use that form, so the [[user]] names and groups here are the realm-qualified ones, so the
-        # token's subject and groups match. seedmi warns these users cannot authenticate a CDMI request directly (the
-        # domain is controller-served) -- which is true and harmless: they exist only to shape the token.
+        # seedmi-local accounts, named in the realm-qualified form the ACLs and ownership use. The domains here are
+        # controller-served, so these do not authenticate a CDMI request (seedmi refers such a credential to the
+        # controller, which resolves the real principal); they are the passwords the SMB and NFS servers check.
         def qual(name): return name + "@" + self.realm
         for uname, ugroups in (("alice", ["storage-admins"]), ("mallory", ["orchestrators"]), ("bob", ["agents"])):
             lines.append("[[user]]")
@@ -801,37 +843,19 @@ class Setup:
             ]))
             lines.append("")
 
-        # A built-in authorization server so the MCP endpoint can be reached without an external IdP. With no key it
-        # generates an RS256 pair at startup and publishes the public half as a JWK Set, which is how the MCP endpoint
-        # verifies a token (0.88). server_base_uri is the issuer, and the MCP protected-resource metadata advertises it.
-        # audience is the CDMI base URI; 0.88 also accepts the MCP uri as an audience, so a token the Inspector obtains
-        # for the endpoint is accepted. A real deployment drops this and points [[domain_controller]] issuer at its IdP.
+        # The access tokens this server accepts. Since 0.128 seedmi issues none and runs no authorization server of its
+        # own -- a CDMI server is not one. The deployment's authorization server is the domain controller, whose
+        # [tokens] block (see dc.toml) mints them; seedmi only verifies. verify_key_file is the public half of the
+        # controller's token-signing key (a PEM public key -> RS256). issuer is the controller's issuer, matched
+        # against a token's `iss`; audience is the CDMI base URI, and the MCP endpoint's own URI is added for free, so a
+        # token the Inspector obtains for the endpoint is accepted. (token_endpoint/client_id would be added here only
+        # for RFC 8693 token exchange, which delegated imports need; this setup does not.)
         lines.append("")
         lines.append("[oauth]")
         lines.extend(toml_table([
-            ("server", True),
-            ("server_port", self.oauth_port),
-            ("server_base_uri", "https://%s:%d" % (self.host, self.oauth_port)),
-            ("server_certificate", "binding"),   # present the binding cert -> the AS is https (RFC 8414/6749 want https)
-            ("server_scopes", ["cdmi:read", "cdmi:write", "cdmi:admin"]),
+            ("issuer", "https://%s:%d/" % (self.host, self.dc_https_port)),
             ("audience", self.base_uri),
-            # CORS for the browser (0.93). The authorization server is a listener of its own, so its metadata, JWK Set and
-            # token endpoint are all fetched cross-origin by a browser client (the MCP Inspector, and cvwm's mcpinspector
-            # app). server_origins is the allow-list it answers a preflight and echoes an Access-Control-Allow-Origin for;
-            # a dev AS whose clients are these tools answers any. "*" is safe here: the server authenticates by a header
-            # (Bearer/Basic), never a cookie, so 0.93 echoes the specific origin and allows credentials rather than
-            # emitting a bare "*". Narrow this to the Inspector/desktop origins for anything real.
-            ("server_origins", ["*"]),
-        ]))
-        lines.append("")
-        # The client the MCP Inspector authenticates as (client_credentials grant: a program with no user in front of
-        # it). Its token acts as this user; the ACLs decide what it may do. Give the Inspector this id and secret.
-        lines.append("[[oauth_client]]")
-        lines.extend(toml_table([
-            ("id", self.oauth_client_id),
-            ("secret", self.oauth_client_secret),
-            ("scopes", ["cdmi:read", "cdmi:write", "cdmi:admin"]),
-            ("user", qual("bob")),
+            ("verify_key_file", os.path.join(pki, self.dc_token_pub)),
         ]))
 
         # CDMI over MCP (revision 347): a protocol binding on a listener of its own, on the hostname at port 8100.
@@ -1582,27 +1606,28 @@ class Setup:
         OUT.line("  (persist it in /etc/sysctl.d/ to survive a reboot). NFS's 2049 is unprivileged and needs nothing.")
         OUT.line("")
         OUT.line("To use the desktop's own **mcpinspector** app (in the browser, no external Inspector): the MCP endpoint")
-        OUT.line("and the authorization server are configured for CORS, but they are on their own ports, and a browser")
-        OUT.line("accepts a self-signed certificate per origin (scheme+host+port). Accepting it for the desktop (:%d) does" % self.https_port)
-        OUT.line("not cover :%d or :%d, so a cross-origin fetch to them fails until each is accepted. Once, in this browser," % (self.mcp_port, self.oauth_port))
+        OUT.line("and the authorization server (the domain controller) are on their own ports, and a browser accepts a")
+        OUT.line("self-signed certificate per origin (scheme+host+port). Accepting it for the desktop (:%d) does" % self.https_port)
+        OUT.line("not cover :%d or :%d, so a cross-origin fetch to them fails until each is accepted. Once, in this browser," % (self.mcp_port, self.dc_https_port))
         OUT.line("open each URL and click through the certificate warning, then open mcpinspector and Connect:")
         OUT.line("  - <https://%s:%d/>   (the MCP endpoint)" % (self.host, self.mcp_port))
-        OUT.line("  - <https://%s:%d/>   (the authorization server)" % (self.host, self.oauth_port))
+        OUT.line("  - <https://%s:%d/>   (the authorization server: the domain controller)" % (self.host, self.dc_https_port))
         OUT.line("A CA-issued certificate for the binding, or adding this run's CA to the OS/browser trust store, removes this step.")
         OUT.line("")
-        OUT.line("To connect the external MCP Inspector to this server, fill its fields as follows (it uses the")
-        OUT.line("client_credentials grant — a program with no user in front of it):")
+        OUT.line("To connect the external MCP Inspector to this server, fill its fields as follows. The authorization")
+        OUT.line("server is the domain controller; the client below is registered there as a [[client]]:")
         OUT.line("- MCP server URL (transport: Streamable HTTP): https://%s:%d/mcp" % (self.host, self.mcp_port))
-        OUT.line("- Issuer / IdP URL: https://%s:%d  (the authorization server; the Inspector discovers /token and /jwks from its RFC 8414 metadata)" % (self.host, self.oauth_port))
+        OUT.line("- Issuer / IdP URL: https://%s:%d/  (the domain controller; the Inspector discovers /token and /jwks from its RFC 8414 metadata)" % (self.host, self.dc_https_port))
         OUT.line("- Pre-configure OAuth credentials for servers requiring authentication: yes")
-        OUT.line("- IdP Client ID (EMA legs 1–2) is the same value as Resource AS Client ID (EMA leg 3): this server is both the IdP and the resource's authorization server, so one [[oauth_client]] serves both.")
+        OUT.line("- IdP Client ID (EMA legs 1–2) is the same value as Resource AS Client ID (EMA leg 3): the domain controller is both the IdP and the resource's authorization server, so one [[client]] serves both.")
         OUT.line("- Resource AS Client ID: %s" % self.oauth_client_id)
-        OUT.line("  The resource authorization server's registered client credential ([[oauth_client]] id) — not a user name, and not the app client id/secret, which belong in Client Settings.")
+        OUT.line("  The controller's registered client credential ([[client]] id) — not a user name, and not the app client id/secret, which belong in Client Settings.")
         OUT.line("- Resource AS Client Secret: %s" % self.oauth_client_secret)
-        OUT.line("  The registered client secret ([[oauth_client]] secret) — not the app client id/secret, which belong in Client Settings.")
-        OUT.line("- Scopes: cdmi:read cdmi:write cdmi:admin")
-        OUT.line("  Space-separated OAuth scopes (RFC 6749). Do not use commas — a comma-separated entry is sent as one invalid token and rejected by the authorization server.")
-        OUT.line("- the Inspector discovers the token endpoint from the endpoint's metadata; it needs no user login. The token acts as %s (the client's user), and the object ACLs decide what it may do." % (self.realm and ("bob@" + self.realm) or "bob"))
+        OUT.line("  The controller's registered client secret ([[client]] secret) — not the app client id/secret, which belong in Client Settings.")
+        OUT.line("- Scopes: leave empty. The MCP endpoint does not require a scope (scopes_required = false), and the controller issues this client none.")
+        OUT.line("- the Inspector discovers the token endpoint from the endpoint's metadata; the client_credentials grant needs no")
+        OUT.line("  user login, and the token then acts as the client itself, %s. To act as a person instead, use the" % (self.oauth_client_id + "@" + self.realm))
+        OUT.line("  password grant with that user's credentials (e.g. alice/alice or bob/bob); the object ACLs decide what either may do.")
         OUT.line("")
         OUT.line("If the Inspector reports \"Version negotiation probe failed: fetch failed\", that is TLS trust, not auth: the")
         OUT.line("MCP endpoint (and the AS) present a self-signed development certificate, and the Inspector's Node backend")
@@ -1701,9 +1726,10 @@ class Setup:
     def check_ports_free(self):
         """Error out if a port this run needs is already in use — a sign a server is already running here."""
         busy = []
+        # The authorization server is the controller's HTTPS listener (checked above); seedmi runs none of its own.
         checks = [("HTTPS", self.https_port), ("HTTP", self.http_port),
                   ("controller HTTPS", self.dc_https_port), ("controller LDAP", self.dc_ldap_port),
-                  ("MCP", self.mcp_port), ("OAuth AS", self.oauth_port)]
+                  ("MCP", self.mcp_port)]
         for sd in self.subdomains:
             checks.append(("%s controller HTTPS" % sd["name"], sd["https_port"]))
             checks.append(("%s controller LDAP" % sd["name"], sd["ldap_port"]))
