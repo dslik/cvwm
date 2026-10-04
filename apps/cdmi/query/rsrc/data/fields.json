@@ -1,0 +1,10 @@
+[
+  { "v": "objectName", "label": "Name", "t": "top", "k": "objectName" },
+  { "v": "objectType", "label": "Type", "t": "top", "k": "objectType" },
+  { "v": "cdmi_size", "label": "Size", "t": "meta", "k": "cdmi_size" },
+  { "v": "cdmi_mtime", "label": "Modified", "t": "meta", "k": "cdmi_mtime" },
+  { "v": "cdmi_ctime", "label": "Created", "t": "meta", "k": "cdmi_ctime" },
+  { "v": "cdmi_owner", "label": "Owner", "t": "meta", "k": "cdmi_owner" },
+  { "v": "cvwm_tags", "label": "Tags…", "t": "meta", "k": "cvwm_tags" },
+  { "v": "_metakey", "label": "Metadata key…", "t": "metakey" }
+]

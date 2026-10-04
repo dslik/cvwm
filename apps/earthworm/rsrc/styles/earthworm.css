@@ -1,0 +1,16 @@
+html,body{margin:0;height:100%}
+body{display:flex;flex-direction:column;background:#bfbfbf;color:#000;font:13px Helvetica,"Nimbus Sans","Liberation Sans",Arial,sans-serif}
+#bar{display:flex;align-items:center;gap:4px;padding:4px 6px;flex:none}
+button{min-width:30px;height:24px;padding:0 8px;display:inline-flex;align-items:center;justify-content:center;background:#bfbfbf;color:#000;font:700 12px inherit;font-family:inherit;border:2px solid;border-color:#fff #555 #555 #fff}
+button:active{border-color:#555 #fff #fff #555}button:disabled{color:#777}button:focus-visible{outline:1px solid #000;outline-offset:1px}
+#url{flex:1;min-width:0;height:24px;box-sizing:border-box;padding:0 6px;background:#fff;color:#000;font:13px "DejaVu Sans Mono",Menlo,Consolas,monospace;border:2px solid;border-color:#555 #fff #fff #555}
+#url:focus{outline:1px solid #000}
+#page{flex:1;min-height:0;width:100%;box-sizing:border-box;background:#fff;border:2px solid;border-color:#555 #fff #fff #555}
+#status{flex:none;padding:2px 8px;font-size:11px;line-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#wrap{flex:1;min-height:0;position:relative;display:flex}
+#page{flex:1}
+#notice{position:absolute;inset:2px;display:none;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:24px;box-sizing:border-box;background:#e8e8e8;color:#222;text-align:center;font:14px/1.5 Helvetica,"Nimbus Sans",Arial,sans-serif}
+#notice.on{display:flex}
+#notice h2{margin:0;font-size:16px}
+#notice p{margin:0;max-width:34em}
+#notice code{font-family:"DejaVu Sans Mono",Menlo,Consolas,monospace;background:#d3d3d3;padding:1px 4px;border-radius:2px;word-break:break-all}

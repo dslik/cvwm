@@ -1,0 +1,18 @@
+html,body{margin:0;height:100%}
+body{display:flex;flex-direction:column;background:#bfbfbf;color:#000;font:12px Helvetica,"Nimbus Sans","Liberation Sans",Arial,sans-serif}
+#bar{display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:4px 6px;flex:none}
+button,select{height:24px;background:#bfbfbf;color:#000;font:700 12px Helvetica,Arial,sans-serif;border:2px solid;border-color:#fff #555 #555 #fff;padding:0 6px}
+button:active,button[aria-pressed="true"]{border-color:#555 #fff #fff #555;background:#e8e8e8}button[aria-pressed="false"]{color:#555}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:1px solid #000;outline-offset:1px}
+button .n{font-weight:400;margin-left:4px}
+input{height:24px;box-sizing:border-box;padding:0 6px;background:#fff;color:#000;font:12px "DejaVu Sans Mono",Menlo,Consolas,monospace;border:2px solid;border-color:#555 #fff #fff #555}
+#find{width:110px}select{max-width:170px}.gap{flex:1}
+#log{--sb-face:#4a505a;--sb-trough:#14171c}
+#log{flex:1;min-height:0;overflow:auto;background:#0b0d10;color:#d0d0d0;font:12px/17px "DejaVu Sans Mono","Liberation Mono",Menlo,Consolas,monospace;border:2px solid;border-color:#555 #fff #fff #555;outline:none}
+.e{display:flex;gap:8px;padding:1px 8px;border-bottom:1px solid #1a1e24;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text}
+.e .t{color:#6f7782;flex:none}.e .s{color:#8fb8ff;flex:none;max-width:22ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.e .m{flex:1;min-width:0}
+.e.error{background:#2a1214;color:#ff9a90}.e.warn{background:#2a2410;color:#f0d67a}.e.info{color:#9fd8ff}.e.debug{color:#8a929c}
+.e.net .m{color:#9aa4b0}.e.net.warn .m{color:#f0d67a}.e.net.error .m{color:#ff9a90}.e.eval .m{color:#fff}.e.eval.error .m{color:#ff9a90}
+.e details{margin-top:2px;color:#9aa4b0}.e summary{cursor:pointer;color:#6f7782}
+#none{padding:14px;color:#8a929c}
+#cmd{display:flex;align-items:center;gap:4px;padding:4px 6px;flex:none}#cmd label{font-weight:700}#code{flex:1;min-width:0}

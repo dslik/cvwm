@@ -1,0 +1,37 @@
+:root{--std:#60a0c0;--hi:#c06077;--grey:#bfbfbf;--lt:rgba(255,255,255,.6);--dk:rgba(0,0,0,.55);--line:rgba(0,0,0,.28);--panel:#b4b4b4;--muted:#555;--sans:Helvetica,"Nimbus Sans","Liberation Sans",Arial,sans-serif;--mono:"DejaVu Sans Mono","Liberation Mono",Menlo,Consolas,monospace}
+html,body{margin:0;height:100%}
+body{display:flex;flex-direction:column;background:var(--grey);color:#000;font:13px/1.3 var(--sans)}
+.bar{display:flex;align-items:center;gap:6px;padding:6px;flex:none}.bar .lab{font:11px var(--sans);color:#444}.sp{flex:1}
+.fv-btn{min-width:0;height:28px;padding:0 12px;background:var(--grey);font:700 13px var(--sans);color:#000;border:2px solid;border-color:var(--lt) var(--dk) var(--dk) var(--lt);white-space:nowrap}
+.fv-btn:active{border-color:var(--dk) var(--lt) var(--lt) var(--dk)}
+.fv-btn:focus-visible{outline:1px solid #000;outline-offset:2px}
+.fv-btn.sm{height:22px;padding:0 8px;font-size:12px}
+.fv-btn:disabled{color:#7a7a7a;text-shadow:1px 1px 0 rgba(255,255,255,.6)}
+.rm{flex:none;width:26px;padding:0;font-weight:700}
+.fv-in{height:26px;padding:0 6px;background:#fff;color:#000;font:13px var(--mono);border:2px solid;border-color:var(--dk) var(--lt) var(--lt) var(--dk);box-sizing:border-box}
+.fv-in:focus{outline:1px solid #000}
+select.fv-in{-webkit-appearance:none;-moz-appearance:none;appearance:none;height:26px;padding:0 22px 0 6px;font:13px var(--sans);border-radius:0;background:#fff url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="9" height="6"><path d="M0 0h9L4.5 6z" fill="%23000"/></svg>') no-repeat right 7px center}
+select.fv-in::-ms-expand{display:none}
+.scoperoot{max-width:280px;overflow:hidden;text-overflow:ellipsis}
+.scope{padding:6px 6px 2px;flex:none;overflow:auto;max-height:46%}
+.grp{border:1px solid var(--line);border-radius:4px;padding:8px;background:var(--panel);display:flex;flex-direction:column;gap:6px;margin-bottom:6px}
+.gh{font:700 11px var(--sans);color:var(--muted)}
+.stmt{display:flex;gap:6px;align-items:center}
+.stmt .join{width:34px;flex:none;text-align:right;font:11px var(--sans);color:var(--muted)}
+.stmt .field{flex:none;width:118px}.stmt .op{flex:none;width:140px}.stmt .val{flex:1;min-width:0}.stmt .mkey{flex:none;width:120px}
+.ordiv{display:flex;align-items:center;gap:8px;color:var(--muted);font:700 11px var(--sans);margin:0 2px 6px}.ordiv .ln{flex:1;height:0;border-top:1px solid #8a8a8a}
+.res{flex:1;min-height:0;background:#fff;border:2px solid;border-color:var(--dk) var(--lt) var(--lt) var(--dk);margin:0 6px;display:flex;flex-direction:column;overflow:hidden}
+.lhead{display:grid;grid-template-columns:34px minmax(160px,1fr) 120px 78px minmax(120px,1.3fr);align-items:center;column-gap:8px;padding:0 8px;position:sticky;top:0;z-index:1;background:var(--grey);border-bottom:1px solid var(--dk);height:22px;flex:none}
+.lhead>div{font:700 11px var(--sans);color:#000;line-height:22px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lhead .num{text-align:right}
+.rows{flex:1;overflow:auto}
+.item{display:grid;grid-template-columns:34px minmax(160px,1fr) 120px 78px minmax(120px,1.3fr);align-items:center;column-gap:8px;padding:0 8px;height:22px;border-bottom:1px solid #eee;cursor:default}
+.item>span{font:12px/22px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .nm{display:flex;align-items:center;gap:5px;min-width:0}.item .nm span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .num{text-align:right}.item .loc{color:#555}
+.item.sel{background:#000}.item.sel span{color:#fff}.item.sel .loc{color:#cfcfcf}.item.sel svg{filter:invert(1)}
+.ic{width:16px;height:16px;flex:none}
+.rel{display:flex;align-items:center}.rel .barfill{width:100%;height:3px;background:#7fb0d8;border:1px solid #4d7ea6;border-radius:2px}.item.sel .rel .barfill{background:#fff;border-color:#fff}
+.empty{padding:14px;color:#8a8a8a;font:12px var(--mono)}
+.foot{flex:none;border-top:2px solid;border-color:var(--dk) var(--lt) var(--lt) var(--dk);padding:5px 8px;display:flex;align-items:center;gap:10px;font:11px var(--sans);color:#333}
+.foot .path{font:11px var(--mono);color:#222;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.foot .cnt{font-weight:700}
+.foot .st{font-weight:700}.foot .st.run{color:#8a5a00}.foot .st.ok{color:#2a7d3a}.foot .st.err{color:#a00}

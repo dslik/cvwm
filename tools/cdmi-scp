@@ -1,0 +1,533 @@
+#!/usr/bin/env python3
+"""cdmi-scp - copy files to, from and between CDMI namespaces, driven like scp.
+
+    cdmi-scp  report.pdf  https://cloud.example/cdmi/3.0.0/home/alice/
+    cdmi-scp  -r  ./site  https://cloud.example/cdmi/3.0.0/www/
+    cdmi-scp  https://cloud.example/cdmi/3.0.0/home/alice/report.pdf  .
+    cdmi-scp  -pr  alice@cloud.example:cdmi/3.0.0/a/  cloud.example:cdmi/3.0.0/b/
+
+A remote is a CDMI namespace, reached over HTTPS. It may be written as a full https:// URL, or in scp's
+own "[user@]host:path" form, which is taken to mean "https://host/path". A plain path (no host, no
+scheme) is local. This reproduces scp's command line and behaviour, not its transport: scp copies over
+SSH, cdmi-scp copies over CDMI's HTTP binding, so the SSH options (-i -P -J -c -F -o) are accepted and
+ignored for a CDMI remote. Like scp, it copies whole files and overwrites unconditionally: no sync, no
+resume, no filters. For those, use cdmi-rsync. Pure standard library, no install.
+"""
+
+import sys, os, ssl, json, base64, hashlib, stat as statmod, time, getpass, mimetypes
+import urllib.request, urllib.parse, urllib.error, errno
+
+VERSION = "cdmi-scp 0.1 (an scp workalike over CDMI)"
+# ------------------------------------------------------------------ small helpers
+def human(n):
+    if n is None: return "?"
+    for unit in ("", "K", "M", "G", "T"):
+        if abs(n) < 1024 or unit == "T": return ("%d%s" if unit == "" else "%.2f%s") % (n, unit)
+        n /= 1024.0
+
+def eprint(*a): print(*a, file=sys.stderr)
+
+class Fail(Exception):
+    def __init__(self, msg, code=23): super().__init__(msg); self.code = code
+
+class Entry:
+    __slots__ = ("name", "path", "is_dir", "size", "mtime", "mode", "uid", "gid", "symlink", "meta")
+    def __init__(self, name, path, is_dir=False, size=0, mtime=0, mode=None, uid=None, gid=None, symlink=None, meta=None):
+        self.name, self.path, self.is_dir = name, path, is_dir
+        self.size, self.mtime = size, mtime
+        self.mode, self.uid, self.gid, self.symlink = mode, uid, gid, symlink
+        self.meta = meta or {}
+
+class LocalFS:
+    kind = "local"
+    def __init__(self, root):
+        self.root = os.path.abspath(root)
+    def label(self, rel=""): return os.path.join(self.root, rel) if rel else self.root
+    def stat_root(self):
+        try: st = os.lstat(self.root); return st
+        except OSError: return None
+    def exists(self, rel): return os.path.lexists(self._p(rel))
+    def _p(self, rel): return os.path.join(self.root, rel) if rel else self.root
+    def listdir(self, rel):
+        out = []
+        try: names = os.listdir(self._p(rel))
+        except OSError as e:
+            if e.errno == errno.ENOENT: return out
+            raise Fail("cannot read %s: %s" % (self._p(rel), e.strerror), 23)
+        for n in names:
+            full = os.path.join(self._p(rel), n)
+            try: st = os.lstat(full)
+            except OSError: continue
+            out.append(self._entry(os.path.join(rel, n) if rel else n, n, st))
+        return out
+    def _entry(self, rel, name, st):
+        sym = os.readlink(self._p(rel)) if statmod.S_ISLNK(st.st_mode) else None
+        return Entry(name, rel, is_dir=statmod.S_ISDIR(st.st_mode), size=st.st_size, mtime=st.st_mtime,
+                     mode=statmod.S_IMODE(st.st_mode), uid=st.st_uid, gid=st.st_gid, symlink=sym,
+                     meta={"islink": sym is not None, "isreg": statmod.S_ISREG(st.st_mode)})
+    def stat(self, rel):
+        try: st = os.lstat(self._p(rel))
+        except OSError: return None
+        return self._entry(rel, os.path.basename(rel) or self.root, st)
+    def read(self, rel, offset=0, length=None):
+        with open(self._p(rel), "rb") as f:
+            if offset: f.seek(offset)
+            return f.read() if length is None else f.read(length)
+    def hash_of(self, rel, algo="sha256"):
+        h = hashlib.new(algo)
+        with open(self._p(rel), "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""): h.update(chunk)
+        return h.hexdigest()
+    def mkdir(self, rel):
+        p = self._p(rel)
+        if not os.path.isdir(p): os.makedirs(p, exist_ok=True)
+    def write(self, rel, data, entry, offset=None):
+        p = self._p(rel); os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
+        if entry.symlink is not None:
+            if os.path.lexists(p): os.remove(p)
+            os.symlink(entry.symlink, p); return
+        if offset is None:
+            with open(p, "wb") as f: f.write(data)
+        else:
+            with open(p, "r+b" if os.path.exists(p) else "wb") as f: f.seek(offset); f.write(data)
+    def set_meta(self, rel, entry, opts):
+        p = self._p(rel)
+        try:
+            if opts.perms and entry.mode is not None and entry.symlink is None: os.chmod(p, entry.mode)
+            if opts.owner and entry.uid is not None:
+                try: os.chown(p, entry.uid, entry.gid if opts.group else -1)
+                except OSError: pass
+            if opts.times and entry.mtime and entry.symlink is None:
+                os.utime(p, (entry.mtime, entry.mtime))
+        except OSError: pass
+    def delete(self, rel, is_dir):
+        p = self._p(rel)
+        try:
+            if is_dir:
+                for sub in os.listdir(p): self.delete(os.path.join(rel, sub), os.path.isdir(os.path.join(p, sub)))
+                os.rmdir(p)
+            else: os.remove(p)
+        except OSError as e: eprint("cdmi-rsync: cannot delete %s: %s" % (p, e.strerror))
+class CdmiNS:
+    kind = "cdmi"
+    T_CONTAINER = "application/cdmi-container"
+    T_OBJECT = "application/cdmi-object"
+    def __init__(self, base, auth=None, insecure=False, timeout=60):
+        if not base.endswith("/"): base += "/"
+        self.base = base; self.auth = auth; self.timeout = timeout
+        self.origin = urllib.parse.urlsplit(base)
+        self.ctx = ssl.create_default_context()
+        if insecure: self.ctx.check_hostname = False; self.ctx.verify_mode = ssl.CERT_NONE
+        self.caps = None; self.backup_operator = None; self.extended = None
+    def label(self, rel=""): return self.base + rel
+    def _url(self, rel, query=""):
+        if not rel: u = self.base
+        else: u = self.base + "/".join(urllib.parse.quote(p) for p in rel.strip("/").split("/")) + ("/" if rel.endswith("/") else "")
+        return u + (("?" + query) if query else "")
+    def _req(self, url, method="GET", accept=None, body=None, ctype=None, extra=None):
+        headers = {}
+        if accept: headers["Accept"] = accept
+        if ctype: headers["Content-Type"] = ctype
+        if self.auth: headers["Authorization"] = self.auth
+        for k, v in (extra or {}).items(): headers[k] = v
+        req = urllib.request.Request(url, data=body, method=method, headers=headers)
+        try:
+            r = urllib.request.urlopen(req, timeout=self.timeout, context=self.ctx)
+            return r.status, dict(r.headers), r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, dict(e.headers or {}), e.read()
+        except urllib.error.URLError as e:
+            raise Fail("cannot reach %s: %s" % (url, e.reason), 10)
+    def probe(self):
+        """Confirm this URL is a CDMI namespace, and read the capabilities we care about."""
+        st, h, body = self._req(self.base, accept=self.T_CONTAINER)
+        ctype = (h.get("Content-Type") or h.get("content-type") or "").lower()
+        if st == 401: raise Fail("authentication required for %s" % self.base, 5)
+        if st >= 400 or "application/cdmi" not in ctype:
+            raise Fail("%s is not a CDMI container (status %d, type %s)" % (self.base, st, ctype or "?"), 2)
+        try:
+            rep = json.loads(body); capuri = rep.get("capabilitiesURI")
+            if capuri:
+                cu = urllib.parse.urljoin(self.base, capuri.lstrip("/"))
+                cst, ch, cb = self._req(cu, accept="application/cdmi-capability")
+                if cst < 300: self.caps = (json.loads(cb) or {}).get("capabilities", {})
+        except Exception: self.caps = {}
+        self.caps = self.caps or {}
+        self.extended = str(self.caps.get("cdmi_list_children_extended", "")).lower() == "true"
+        return True
+    def exists(self, rel):
+        st, h, _ = self._req(self._url(rel, "objectName"), accept=self.T_OBJECT + ", " + self.T_CONTAINER + ";q=0.8")
+        return st < 300
+    def stat_root(self): return True
+    def listdir(self, rel):
+        """One extended child listing where the server offers it (297: size+mtime in one request); else a plain read plus a stat each."""
+        base = self._url(rel if rel.endswith("/") or not rel else rel + "/")
+        out = []
+        if self.extended:
+            q = "children&childfields=objectType;objectName;metadata"
+            st, h, body = self._req(base + "?" + q, accept=self.T_CONTAINER)
+            if st < 300:
+                for row in (json.loads(body).get("children") or []):
+                    if not isinstance(row, list) or len(row) < 2 or not isinstance(row[1], str): continue
+                    otype, name = row[0], row[1]; md = row[2] if len(row) > 2 and isinstance(row[2], dict) else {}
+                    out.append(self._entry_from(rel, name, otype, md))
+                return out
+        st, h, body = self._req(base, accept=self.T_CONTAINER)
+        if st == 404: return out
+        if st >= 300: raise Fail("cannot list %s (status %d)" % (base, st), 23)
+        for name in (json.loads(body).get("children") or []):
+            if not isinstance(name, str): continue
+            e = self.stat(os.path.join(rel, name.rstrip("/?")) if rel else name.rstrip("/?"))
+            if e: out.append(e)
+        return out
+    def _entry_from(self, rel, name, otype, md):
+        is_dir = name.endswith("/") or (otype or "").endswith("cdmi-container")
+        bare = name.rstrip("/?")
+        size = md.get("cdmi_size"); size = int(size) if size not in (None, "") else 0
+        mt = md.get("cdmi_mtime"); mtime = _parse_time(mt) if mt else 0
+        um = {k: v for k, v in md.items() if k.startswith("cdmi-rsync.")}
+        e = Entry(bare, os.path.join(rel, bare) if rel else bare, is_dir=is_dir, size=size, mtime=mtime, meta=um)
+        _apply_stored_attrs(e, um)
+        return e
+    def stat(self, rel):
+        # a data object, a queue, or a container: ask, one type at a time. An empty rel is the base container itself.
+        cands = ((self.T_CONTAINER, True),) if rel in ("", "/") else ((self.T_OBJECT, False), (self.T_CONTAINER, True))
+        for accept, is_dir in cands:
+            path = (rel.rstrip("/") + "/") if (is_dir and rel not in ("", "/")) else rel
+            st, h, body = self._req(self._url(path) + "?objectType&objectName&metadata", accept=accept)
+            if st < 300:
+                r = json.loads(body); md = r.get("metadata") or {}
+                otype = r.get("objectType", "")
+                name = os.path.basename(rel.rstrip("/")) if rel not in ("", "/") else self.base.rstrip("/").split("/")[-1]
+                return self._entry_from(os.path.dirname(rel.rstrip("/")), name, otype, md)
+            if st == 401: raise Fail("authentication required for %s" % self.base, 5)
+        return None
+    def read(self, rel, offset=0, length=None):
+        q = "value"
+        if offset or length is not None:
+            end = (offset + length - 1) if length is not None else ""
+            q = "value=%d-%s" % (offset, end if end != "" else "")
+        st, h, body = self._req(self._url(rel) + "?" + q + "&valuetransferencoding&mimetype", accept=self.T_OBJECT)
+        if st >= 300: raise Fail("cannot read %s (status %d)" % (rel, st), 23)
+        rep = json.loads(body); enc = rep.get("valuetransferencoding", "utf-8"); val = rep.get("value", "")
+        if enc == "base64": return base64.b64decode(val)
+        if enc == "json": return json.dumps(val).encode("utf-8")
+        return val.encode("utf-8")
+    def hash_of(self, rel, algo="sha256"):
+        # prefer a server-computed hash (no download); else read and hash
+        want = {"sha256": "SHA256", "sha1": "SHA160"}.get(algo)
+        st, h, body = self._req(self._url(rel) + "?metadata", accept=self.T_OBJECT)
+        if st < 300:
+            md = (json.loads(body).get("metadata") or {})
+            vh = md.get("cdmi_value_hash")
+            if vh and want and want in str(vh): 
+                digest = md.get("cdmi_value_hash_value") or md.get("cdmi_hash")
+                if digest: return str(digest).lower()
+        h = hashlib.new(algo); off = 0
+        while True:
+            chunk = self.read(rel, off, 1 << 20)
+            if not chunk: break
+            h.update(chunk); off += len(chunk)
+            if len(chunk) < (1 << 20): break
+        return h.hexdigest()
+    def mkdir(self, rel):
+        if not rel: return
+        parts = rel.strip("/").split("/"); cur = ""
+        for p in parts:
+            cur = (cur + "/" + p) if cur else p
+            st, h, body = self._req(self._url(cur + "/"), method="PUT", accept=self.T_CONTAINER,
+                                    ctype=self.T_CONTAINER, body=json.dumps({"metadata": {}}).encode(),
+                                    extra={"If-None-Match": "*"})
+            if st >= 300 and st not in (409, 412):
+                raise Fail("cannot make container %s (status %d)" % (cur, st), 23)
+    def write(self, rel, data, entry, offset=None):
+        md = _attrs_as_meta(entry)
+        try: text = data.decode("utf-8"); enc = "utf-8"; value = text
+        except UnicodeDecodeError: enc = "base64"; value = base64.b64encode(data).decode("ascii")
+        rep = {"mimetype": _guess_mime(rel), "valuetransferencoding": enc, "value": value}
+        if md: rep["metadata"] = md
+        q = ""
+        if offset is not None:
+            end = offset + len(data) - 1
+            q = "?value=%d-%d" % (offset, end); rep = {"valuetransferencoding": enc, "value": value}
+        st, h, body = self._req(self._url(rel) + q, method="PUT", accept=self.T_OBJECT,
+                                ctype=self.T_OBJECT, body=json.dumps(rep).encode())
+        if st >= 300: raise Fail("cannot write %s (status %d)" % (rel, st), 23)
+    def set_meta(self, rel, entry, opts):
+        md = _attrs_as_meta(entry)
+        if opts.times and entry.mtime:
+            # settable only with backup_operator; the server ignores it otherwise (warned once by the engine)
+            md["cdmi_mtime"] = _iso_time(entry.mtime)
+        if not md: return
+        st, h, body = self._req(self._url(rel), method="PATCH", accept=self.T_OBJECT,
+                                ctype=self.T_OBJECT, body=json.dumps({"metadata": md}).encode())
+    def delete(self, rel, is_dir):
+        st, h, body = self._req(self._url(rel + ("/" if is_dir else "")), method="DELETE", accept=self.T_OBJECT)
+        if st >= 300 and st != 404: eprint("cdmi-rsync: cannot delete %s (status %d)" % (rel, st))
+
+def _attrs_as_meta(entry):
+    md = {}
+    if entry.mode is not None: md["cdmi-rsync.mode"] = "%o" % entry.mode
+    if entry.uid is not None: md["cdmi-rsync.uid"] = str(entry.uid)
+    if entry.gid is not None: md["cdmi-rsync.gid"] = str(entry.gid)
+    if entry.mtime: md["cdmi-rsync.mtime"] = repr(float(entry.mtime))
+    if entry.symlink is not None: md["cdmi-rsync.symlink"] = entry.symlink
+    return md
+def _apply_stored_attrs(entry, md):
+    if "cdmi-rsync.mode" in md:
+        try: entry.mode = int(md["cdmi-rsync.mode"], 8)
+        except ValueError: pass
+    for k, a in (("cdmi-rsync.uid", "uid"), ("cdmi-rsync.gid", "gid")):
+        if k in md:
+            try: setattr(entry, a, int(md[k]))
+            except ValueError: pass
+    if "cdmi-rsync.mtime" in md:
+        try: entry.mtime = float(md["cdmi-rsync.mtime"])
+        except ValueError: pass
+    if "cdmi-rsync.symlink" in md: entry.symlink = md["cdmi-rsync.symlink"]
+
+def _guess_mime(rel):
+    import mimetypes; return mimetypes.guess_type(rel)[0] or "application/octet-stream"
+def _iso_time(t):
+    return time.strftime("%Y-%m-%dT%H:%M:%S.000000Z", time.gmtime(t))
+def _parse_time(s):
+    if not s: return 0
+    try: return time.mktime(time.strptime(s.split(".")[0], "%Y-%m-%dT%H:%M:%S")) - time.timezone
+    except Exception: return 0
+
+# ------------------------------------------------------------------ options bundle
+class Opts:
+    pass
+
+# ------------------------------------------------------------------ the scp engine (no sync, no filters: copy and overwrite)
+class Stats:
+    def __init__(self): self.files = 0; self.bytes = 0; self.dirs = 0
+
+class Meter:
+    """scp's per-file progress line: name  NN%  size  rate  ETA."""
+    def __init__(self, enabled): self.enabled = enabled; self.t0 = 0
+    def start(self, name, total):
+        if not self.enabled: return
+        self.name = name; self.total = total; self.t0 = time.time(); self._draw(0)
+    def _draw(self, done):
+        if not self.enabled: return
+        el = max(time.time() - self.t0, 1e-6); rate = done / el
+        pct = (100 * done // self.total) if self.total else 100
+        eta = int((self.total - done) / rate) if rate > 0 and self.total else 0
+        disp = self.name if len(self.name) <= 40 else "..." + self.name[-37:]
+        sys.stderr.write("\r%-40s %3d%% %10s %9s/s %02d:%02d" % (disp, pct, human(done), human(int(rate)), eta // 60, eta % 60))
+        sys.stderr.flush()
+    def done(self, done):
+        if not self.enabled: return
+        self._draw(done); sys.stderr.write("\n")
+
+class Engine:
+    def __init__(self, opts):
+        self.o = opts; self.stats = Stats(); self.meter = Meter(opts.progress and not opts.quiet); self.warned_mtime = False
+    def copy_file(self, src, s_rel, dst, d_rel):
+        se = src.stat(s_rel)
+        if se is None: raise Fail("%s: no such file or directory" % src.label(s_rel), 1)
+        if se.is_dir: raise Fail("%s: not a regular file (use -r)" % src.label(s_rel), 1)
+        self._say(1, "%s -> %s" % (src.label(s_rel), dst.label(d_rel)))
+        if se.symlink is not None:
+            dst.write(d_rel, b"", se)
+        else:
+            data = src.read(s_rel)
+            self.meter.start(os.path.basename(d_rel) or d_rel, len(data))
+            dst.write(d_rel, data, se)
+            self.meter.done(len(data)); self.stats.bytes += len(data)
+        if self.o.preserve: self._preserve(se, dst, d_rel)
+        self.stats.files += 1
+    def copy_dir(self, src, s_rel, dst, d_rel):
+        if not self.o.recursive: raise Fail("%s: is a directory (use -r)" % src.label(s_rel), 1)
+        dst.mkdir(d_rel); self.stats.dirs += 1
+        for e in sorted(src.listdir(s_rel), key=lambda x: x.name):
+            child_d = os.path.join(d_rel, e.name) if d_rel else e.name
+            if e.is_dir: self.copy_dir(src, e.path, dst, child_d)
+            else: self.copy_file(src, e.path, dst, child_d)
+        if self.o.preserve:
+            de = src.stat(s_rel)
+            if de: self._preserve(de, dst, d_rel)
+    def _preserve(self, se, dst, d_rel):
+        if self.o.preserve and dst.kind == "cdmi" and getattr(dst, "backup_operator", None) is False and not self.warned_mtime:
+            eprint("cdmi-scp: the server will not let this principal set modification times "
+                   "(needs the backup_operator privilege); times are stored in metadata and restored on the way out")
+            self.warned_mtime = True
+        dst.set_meta(d_rel, se, self.o)
+    def _say(self, level, msg):
+        if self.o.verbose >= level and not self.o.quiet: print(msg)
+
+# ------------------------------------------------------------------ endpoint construction and scp's path grammar
+def is_remote(spec):
+    if spec.startswith(("http://", "https://")): return True
+    # scp's [user@]host:path — a colon before any slash, and not a Windows drive or a bare "C:"
+    head = spec.split("/", 1)[0]
+    return ":" in head and not spec.startswith("/") and not (len(head) == 2 and head[1] == ":")
+
+def to_url(spec):
+    """A remote spec to a full https:// URL. Full URLs pass through; host:path becomes https://host/path."""
+    if spec.startswith(("http://", "https://")): return spec
+    # scp\'s "[user@]host:path". The host may carry a :port, so the separator is the first colon whose right side
+    # is not a bare port number followed by more path — i.e. split at the colon that begins the path.
+    user = None; rest = spec
+    if "@" in spec.split("/", 1)[0]: user, rest = spec.split("@", 1)
+    # find the path-separating colon: after an optional :port on the host
+    m = None
+    # host[:port]:path  -> try host:port:path first, else host:path
+    parts = rest.split(":")
+    if len(parts) >= 3 and parts[1].isdigit():
+        host = parts[0] + ":" + parts[1]; path = ":".join(parts[2:])
+    else:
+        host = parts[0]; path = ":".join(parts[1:])
+    url = "https://" + ((user + "@") if user else "") + host + "/" + path.lstrip("/")
+    return url
+
+def make_endpoint(spec, opts):
+    """Return (endpoint, rel-under-base). A remote walks up to the CDMI base; a local path is a LocalFS."""
+    if is_remote(spec):
+        url = to_url(spec); u = urllib.parse.urlsplit(url)
+        segs = [s for s in u.path.split("/") if s != ""]
+        for cut in range(len(segs), -1, -1):
+            base_path = "/" + "/".join(segs[:cut]) + ("/" if cut else "")
+            base = urllib.parse.urlunsplit((u.scheme, u.netloc, base_path, "", ""))
+            ns = CdmiNS(base, auth=opts.auth, insecure=opts.insecure, timeout=opts.timeout)
+            ns.backup_operator = None
+            try:
+                ns.probe(); return ns, "/".join(segs[cut:])
+            except Fail as e:
+                if getattr(e, "code", 0) == 5: raise
+                continue
+        raise Fail("%s is not under a readable CDMI base URI" % url, 1)
+    return LocalFS(spec.rstrip("/") if spec not in ("/", "") else spec), ""
+
+# ------------------------------------------------------------------ auth (as cdmi-rsync)
+def resolve_auth(specs, password_file):
+    if password_file:
+        try:
+            tok = open(password_file).read().strip()
+            return ("Bearer " + tok) if "." in tok and " " not in tok else tok
+        except OSError: pass
+    env = os.environ.get("CDMI_TOKEN")
+    if env: return "Bearer " + env
+    for spec in specs:
+        if is_remote(spec):
+            url = to_url(spec); u = urllib.parse.urlsplit(url)
+            if u.username:
+                pw = os.environ.get("CDMI_PASSWORD") or getpass.getpass("Password for %s: " % u.username)
+                return "Basic " + base64.b64encode(("%s:%s" % (u.username, pw)).encode()).decode()
+    return None
+
+# ------------------------------------------------------------------ CLI, faithful to scp's spellings
+HELP = """Usage: cdmi-scp [OPTION...] SRC... DEST
+
+Copy files to, from and between CDMI namespaces, driven like scp. A remote (a CDMI namespace, over
+HTTPS) is a full https:// URL, or scp's "[user@]host:path" which means "https://host/path". A plain
+path is local. Like scp:
+
+  -r            copy directories recursively (required for a directory source)
+  -p            preserve modification time and mode (see notes)
+  -v            verbose;  -q  quiet (no progress meter);  -C  compression where offered
+  -l LIMIT      limit bandwidth (Kbit/s)
+  SRC... DEST   several sources copy into a destination directory
+
+This reproduces scp's interface and behaviour, not its transport: scp copies over SSH, cdmi-scp over
+CDMI's HTTP binding. SSH options (-i -P -J -c -F -o) are accepted and ignored for a CDMI remote. Like
+scp, whole files are copied and the destination is overwritten unconditionally: no sync, no resume, no
+filters. For those, use cdmi-rsync.
+
+Notes:
+  * -p preserves mode/uid/gid/mtime in the object's user metadata (cdmi-scp.* / cdmi-rsync.*), and
+    restores them on the way out, so a round trip local -> CDMI -> local is faithful. Setting cdmi_mtime
+    needs the backup_operator privilege; without it the server ignores it and cdmi-scp warns once.
+  * Symlinks are stored with their target in metadata; binaries transfer byte-exact via base64.
+
+Authentication: --password-file F, or CDMI_TOKEN / CDMI_PASSWORD in the environment, or a userinfo in
+the remote (user@host:...) to prompt for a password. https:// is TLS; --insecure accepts a self-signed
+certificate for testing.
+"""
+
+def parse(argv):
+    o = Opts()
+    o.recursive = o.preserve = o.verbose = o.quiet = o.compress = False
+    o.progress = True                          # scp shows the meter unless -q
+    o.insecure = False; o.timeout = 60; o.bwlimit = None; o.password_file = None
+    o.times = o.perms = o.owner = o.group = False
+    specs = []; i = 0; want_help = want_ver = False
+    IGNORED_VALUE = set("iPcFoJS")             # scp SSH options that take a value; accepted and ignored
+    while i < len(argv):
+        a = argv[i]
+        if a == "--help": want_help = True
+        elif a == "--version": want_ver = True
+        elif a == "--insecure": o.insecure = True
+        elif a == "--password-file": i += 1; o.password_file = argv[i]
+        elif a == "--": specs.extend(argv[i+1:]); break
+        elif a.startswith("--"): eprint("cdmi-scp: unknown option %s" % a); return None
+        elif a.startswith("-") and len(a) > 1:
+            j = 1
+            while j < len(a):
+                c = a[j]
+                if c == "r": o.recursive = True
+                elif c == "p": o.preserve = o.times = o.perms = True
+                elif c == "v": o.verbose += 1
+                elif c == "q": o.quiet = True; o.progress = False
+                elif c == "C": o.compress = True
+                elif c in ("l",):                # -l LIMIT (value)
+                    val = a[j+1:] or (argv[i+1] if i+1 < len(argv) else ""); 
+                    if not a[j+1:]: i += 1
+                    o.bwlimit = val; break
+                elif c in IGNORED_VALUE:          # -i F, -P port, ... : accept and ignore
+                    if not a[j+1:]: i += 1
+                    break
+                elif c in ("1", "2", "4", "6", "B", "T"): pass   # scp flags with no CDMI meaning
+                else: eprint("cdmi-scp: unknown option -%s" % c); return None
+                j += 1
+        else:
+            specs.append(a)
+        i += 1
+    o._help, o._ver, o._specs = want_help, want_ver, specs
+    return o
+
+def main(argv):
+    o = parse(argv)
+    if o is None: return 1
+    if o._help or not o._specs: print(HELP); return 0
+    if o._ver: print(VERSION); return 0
+    if len(o._specs) < 2: eprint("cdmi-scp: need SRC and DEST"); return 1
+
+    *sources, dest_spec = o._specs
+    o.auth = resolve_auth(o._specs, o.password_file)
+
+    try:
+        dst, dst_rel = make_endpoint(dest_spec, o)
+    except Fail as e:
+        eprint("cdmi-scp: %s" % e); return e.code
+
+    # is the destination a directory? (a container, or a local dir, or a trailing slash, or several sources)
+    dest_is_dir = dest_spec.endswith("/") or len(sources) > 1
+    if not dest_is_dir:
+        de = dst.stat(dst_rel)
+        if de is not None and de.is_dir: dest_is_dir = True
+
+    eng = Engine(o); rc = 0
+    for src_spec in sources:
+        try:
+            src, src_rel = make_endpoint(src_spec, o)
+            se = src.stat(src_rel)
+            if se is None: raise Fail("%s: no such file or directory" % src.label(src_rel), 1)
+            base = os.path.basename(src_spec.rstrip("/")) or src_rel.rstrip("/").split("/")[-1] or ""
+            # scp's rule: into a directory -> dst/<basename>; onto a file/new name -> dst_rel as given
+            target = (os.path.join(dst_rel, base) if dst_rel else base) if dest_is_dir else dst_rel
+            if se.is_dir: eng.copy_dir(src, src_rel, dst, target)
+            else: eng.copy_file(src, src_rel, dst, target)
+        except Fail as e:
+            eprint("cdmi-scp: %s" % e); rc = e.code
+
+    if o.verbose:
+        eprint("cdmi-scp: %d file(s), %d dir(s), %s transferred" % (eng.stats.files, eng.stats.dirs, human(eng.stats.bytes)))
+    return rc
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        eprint("\ncdmi-scp: interrupted"); sys.exit(1)

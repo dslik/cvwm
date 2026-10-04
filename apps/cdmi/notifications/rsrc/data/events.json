@@ -1,0 +1,1 @@
+["cdmi_create_processing", "cdmi_create_complete", "cdmi_read", "cdmi_modify_processing", "cdmi_modify_complete", "cdmi_rename", "cdmi_copy", "cdmi_reference", "cdmi_delete", "cdmi_export", "cdmi_snapshot"]

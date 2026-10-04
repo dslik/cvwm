@@ -1,0 +1,23 @@
+{
+  "title": "postcdmi",
+  "uriPlaceholder": "https://host:port/cdmi/3.0.0/path",
+  "templateTitle": "Fill in a common CDMI request",
+  "send": "Send",
+  "tabBody": "Body",
+  "tabHeaders": "Headers",
+  "bodyPlaceholder": "Request body (JSON for a CDMI representation)",
+  "addHeader": "+ header",
+  "headerPlaceholder": "Header",
+  "valuePlaceholder": "Value",
+  "remove": "Remove",
+  "noRequest": "No request sent yet.",
+  "mustBeHttps": "The URI must be an https: URL.",
+  "sending": "Sending …",
+  "noHeaders": "(no headers)",
+  "emptyBody": "(empty body)",
+  "failed": "Failed",
+  "networkErr": "the request could not be sent (network, CORS, or TLS)",
+  "corsHint": "A cross-origin server must allow this origin (CORS); an http: URL from this https: page is blocked as mixed content.",
+  "discoveryHint": "This looks like a discovery reference, which answers a 307 redirect to a base URI. The browser could not follow it (often the base is at another origin, or the redirect target refused this origin). Use the Namespaces window to mount it, or GET the base URI directly.",
+  "didNotComplete": "The request did not complete."
+}

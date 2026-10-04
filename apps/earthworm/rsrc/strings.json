@@ -1,0 +1,19 @@
+{
+  "title": "Earthworm",
+  "back": "Back",
+  "forward": "Forward",
+  "reload": "Reload",
+  "home": "Home",
+  "go": "Go",
+  "location": "Location",
+  "urlPlaceholder": "Type a web address",
+  "loading": "Loading {a} …",
+  "noJavascript": "javascript: addresses are not opened.",
+  "httpTitle": "This page can’t be shown",
+  "httpBody": "Earthworm runs inside a secure (https) desktop, and a browser will not load an insecure (http) page inside it. This is a browser security rule, not a limit of Earthworm.",
+  "httpTry": "Try the secure address instead: ",
+  "refusedTitle": "This site can’t be shown here",
+  "refusedBody1": " did not load in the frame. The usual cause is that the site forbids being displayed inside another page.",
+  "refusedBody2": "Many sites refuse to be embedded, as a security measure. This is the site’s choice, not a limit of Earthworm.",
+  "drifted": "A link was followed inside the page; its address is not visible. Back returns to the address shown."
+}

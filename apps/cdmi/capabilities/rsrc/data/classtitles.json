@@ -1,0 +1,8 @@
+{
+  "root": "Capabilities of the CDMI server as a whole",
+  "container": "Operations and features supported for container objects",
+  "dataobject": "Operations and features supported for data objects",
+  "queue": "Operations and features supported for queue objects",
+  "domain": "Operations and features supported for domain objects",
+  "capability": "Operations supported for capability objects"
+}

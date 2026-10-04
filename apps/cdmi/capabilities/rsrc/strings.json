@@ -1,0 +1,9 @@
+{
+  "reading": "READING CAPABILITIES",
+  "filterLabel": "Filter",
+  "filterPlaceholder": "capability name or keyword",
+  "present": "PRESENT",
+  "reported": "REPORTED",
+  "withheld": "WITHHELD",
+  "notImplemented": "NOT IMPLEMENTED"
+}

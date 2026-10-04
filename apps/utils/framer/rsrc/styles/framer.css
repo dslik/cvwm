@@ -1,0 +1,15 @@
+html,body{margin:0;height:100%;background:#20222a;color:#e6e6e6;font:13px Helvetica,"Nimbus Sans","Liberation Sans",Arial,sans-serif}
+body{display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
+.box{width:100%;max-width:560px}h2{margin:0 0 4px;font-size:17px}p.sub{margin:0 0 16px;color:#9aa0b0;line-height:1.5}
+label{display:block;margin:12px 0 4px;color:#c7ccd8;font-size:12px}
+input{width:100%;box-sizing:border-box;height:32px;padding:0 9px;background:#12141a;color:#eee;border:1px solid #3a3f4b;border-radius:4px;font:13px "DejaVu Sans Mono",monospace}
+input:focus{outline:none;border-color:#3b6ea5}
+.hint{color:#7a8090;font-size:11px;margin-top:3px}
+.preview{display:flex;align-items:center;gap:10px;margin-top:16px;min-height:48px}
+.preview img,.preview canvas{width:48px;height:48px;image-rendering:auto;background:#0c0d11;border:1px solid #333;border-radius:6px}
+.preview .lbl{color:#9aa0b0;font-size:12px}
+.err{color:#ff8a80;min-height:18px;font-size:12px;margin-top:10px}
+.msg{color:#8fd48f;min-height:18px;font-size:12px;margin-top:10px}
+.row{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+button{height:32px;padding:0 16px;background:#333844;color:#eee;border:1px solid #4a5060;border-radius:4px;cursor:pointer}
+button:hover{background:#3d4350}button.go{background:#3b6ea5;border-color:#3b6ea5}button:disabled{opacity:.5;cursor:default}

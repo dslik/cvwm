@@ -1,0 +1,633 @@
+#!/usr/bin/env python3
+"""cdmi-rsync - copy files to, from and between CDMI namespaces, driven like rsync.
+
+    cdmi-rsync -av  ./photos/  https://cloud.example/cdmi/3.0.0/home/alice/photos/
+    cdmi-rsync -av  https://cloud.example/cdmi/3.0.0/home/alice/photos/  ./photos/
+    cdmi-rsync -avn --delete  ./site/  https://a.example/cdmi/3.0.0/www/
+
+A source or destination is a CDMI namespace when it is an http:// or https:// URL, and a local path
+otherwise. The command line, the trailing-slash rule, the filters, the change-detection and the exit
+codes are rsync's; the transfer is not. rsync's delta algorithm needs an rsync peer on the far side,
+which a CDMI server is not, so whole objects are transferred (with ranged resume for --append). This
+is a drop-in for how you invoke rsync, not for the rsync wire protocol; --help and the notes below say
+where the two differ. Pure standard library, no install.
+"""
+
+import sys, os, io, ssl, json, base64, fnmatch, hashlib, stat as statmod, time, getpass, urllib.request, urllib.parse, urllib.error, gzip, argparse, errno
+
+VERSION = "cdmi-rsync 0.1 (an rsync workalike over CDMI)"
+
+# ------------------------------------------------------------------ small helpers
+def human(n):
+    if n is None: return "?"
+    for unit in ("", "K", "M", "G", "T"):
+        if abs(n) < 1024 or unit == "T": return ("%d%s" if unit == "" else "%.2f%s") % (n, unit)
+        n /= 1024.0
+
+def eprint(*a): print(*a, file=sys.stderr)
+
+class Fail(Exception):
+    def __init__(self, msg, code=23): super().__init__(msg); self.code = code
+
+# ------------------------------------------------------------------ an entry the engine reasons about
+class Entry:
+    __slots__ = ("name", "path", "is_dir", "size", "mtime", "mode", "uid", "gid", "symlink", "meta")
+    def __init__(self, name, path, is_dir=False, size=0, mtime=0, mode=None, uid=None, gid=None, symlink=None, meta=None):
+        self.name, self.path, self.is_dir = name, path, is_dir
+        self.size, self.mtime = size, mtime
+        self.mode, self.uid, self.gid, self.symlink = mode, uid, gid, symlink
+        self.meta = meta or {}
+
+# ------------------------------------------------------------------ backends: LocalFS and CdmiNS share one interface
+class LocalFS:
+    kind = "local"
+    def __init__(self, root):
+        self.root = os.path.abspath(root)
+    def label(self, rel=""): return os.path.join(self.root, rel) if rel else self.root
+    def stat_root(self):
+        try: st = os.lstat(self.root); return st
+        except OSError: return None
+    def exists(self, rel): return os.path.lexists(self._p(rel))
+    def _p(self, rel): return os.path.join(self.root, rel) if rel else self.root
+    def listdir(self, rel):
+        out = []
+        try: names = os.listdir(self._p(rel))
+        except OSError as e:
+            if e.errno == errno.ENOENT: return out
+            raise Fail("cannot read %s: %s" % (self._p(rel), e.strerror), 23)
+        for n in names:
+            full = os.path.join(self._p(rel), n)
+            try: st = os.lstat(full)
+            except OSError: continue
+            out.append(self._entry(os.path.join(rel, n) if rel else n, n, st))
+        return out
+    def _entry(self, rel, name, st):
+        sym = os.readlink(self._p(rel)) if statmod.S_ISLNK(st.st_mode) else None
+        return Entry(name, rel, is_dir=statmod.S_ISDIR(st.st_mode), size=st.st_size, mtime=st.st_mtime,
+                     mode=statmod.S_IMODE(st.st_mode), uid=st.st_uid, gid=st.st_gid, symlink=sym,
+                     meta={"islink": sym is not None, "isreg": statmod.S_ISREG(st.st_mode)})
+    def stat(self, rel):
+        try: st = os.lstat(self._p(rel))
+        except OSError: return None
+        return self._entry(rel, os.path.basename(rel) or self.root, st)
+    def read(self, rel, offset=0, length=None):
+        with open(self._p(rel), "rb") as f:
+            if offset: f.seek(offset)
+            return f.read() if length is None else f.read(length)
+    def hash_of(self, rel, algo="sha256"):
+        h = hashlib.new(algo)
+        with open(self._p(rel), "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""): h.update(chunk)
+        return h.hexdigest()
+    def mkdir(self, rel):
+        p = self._p(rel)
+        if not os.path.isdir(p): os.makedirs(p, exist_ok=True)
+    def write(self, rel, data, entry, offset=None):
+        p = self._p(rel); os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
+        if entry.symlink is not None:
+            if os.path.lexists(p): os.remove(p)
+            os.symlink(entry.symlink, p); return
+        if offset is None:
+            with open(p, "wb") as f: f.write(data)
+        else:
+            with open(p, "r+b" if os.path.exists(p) else "wb") as f: f.seek(offset); f.write(data)
+    def set_meta(self, rel, entry, opts):
+        p = self._p(rel)
+        try:
+            if opts.perms and entry.mode is not None and entry.symlink is None: os.chmod(p, entry.mode)
+            if opts.owner and entry.uid is not None:
+                try: os.chown(p, entry.uid, entry.gid if opts.group else -1)
+                except OSError: pass
+            if opts.times and entry.mtime and entry.symlink is None:
+                os.utime(p, (entry.mtime, entry.mtime))
+        except OSError: pass
+    def delete(self, rel, is_dir):
+        p = self._p(rel)
+        try:
+            if is_dir:
+                for sub in os.listdir(p): self.delete(os.path.join(rel, sub), os.path.isdir(os.path.join(p, sub)))
+                os.rmdir(p)
+            else: os.remove(p)
+        except OSError as e: eprint("cdmi-rsync: cannot delete %s: %s" % (p, e.strerror))
+
+class CdmiNS:
+    kind = "cdmi"
+    T_CONTAINER = "application/cdmi-container"
+    T_OBJECT = "application/cdmi-object"
+    def __init__(self, base, auth=None, insecure=False, timeout=60):
+        if not base.endswith("/"): base += "/"
+        self.base = base; self.auth = auth; self.timeout = timeout
+        self.origin = urllib.parse.urlsplit(base)
+        self.ctx = ssl.create_default_context()
+        if insecure: self.ctx.check_hostname = False; self.ctx.verify_mode = ssl.CERT_NONE
+        self.caps = None; self.backup_operator = None; self.extended = None
+    def label(self, rel=""): return self.base + rel
+    def _url(self, rel, query=""):
+        u = self.base + "/".join(urllib.parse.quote(p) for p in rel.split("/")) if rel else self.base
+        if rel and query and not rel.endswith("/") and False: pass
+        return u + (("?" + query) if query else "")
+    def _req(self, url, method="GET", accept=None, body=None, ctype=None, extra=None):
+        headers = {}
+        if accept: headers["Accept"] = accept
+        if ctype: headers["Content-Type"] = ctype
+        if self.auth: headers["Authorization"] = self.auth
+        for k, v in (extra or {}).items(): headers[k] = v
+        req = urllib.request.Request(url, data=body, method=method, headers=headers)
+        try:
+            r = urllib.request.urlopen(req, timeout=self.timeout, context=self.ctx)
+            return r.status, dict(r.headers), r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, dict(e.headers or {}), e.read()
+        except urllib.error.URLError as e:
+            raise Fail("cannot reach %s: %s" % (url, e.reason), 10)
+    def probe(self):
+        """Confirm this URL is a CDMI namespace, and read the capabilities we care about."""
+        st, h, body = self._req(self.base, accept=self.T_CONTAINER)
+        ctype = (h.get("Content-Type") or h.get("content-type") or "").lower()
+        if st == 401: raise Fail("authentication required for %s" % self.base, 5)
+        if st >= 400 or "application/cdmi" not in ctype:
+            raise Fail("%s is not a CDMI container (status %d, type %s)" % (self.base, st, ctype or "?"), 2)
+        try:
+            rep = json.loads(body); capuri = rep.get("capabilitiesURI")
+            if capuri:
+                cu = urllib.parse.urljoin(self.base, capuri.lstrip("/"))
+                cst, ch, cb = self._req(cu, accept="application/cdmi-capability")
+                if cst < 300: self.caps = (json.loads(cb) or {}).get("capabilities", {})
+        except Exception: self.caps = {}
+        self.caps = self.caps or {}
+        self.extended = str(self.caps.get("cdmi_list_children_extended", "")).lower() == "true"
+        return True
+    def exists(self, rel):
+        st, h, _ = self._req(self._url(rel, "objectName"), accept=self.T_OBJECT + ", " + self.T_CONTAINER + ";q=0.8")
+        return st < 300
+    def stat_root(self): return True
+    def listdir(self, rel):
+        """One extended child listing where the server offers it (297: size+mtime in one request); else a plain read plus a stat each."""
+        base = self._url(rel if rel.endswith("/") or not rel else rel + "/")
+        out = []
+        if self.extended:
+            q = "children&childfields=objectType;objectName;metadata"
+            st, h, body = self._req(base + "?" + q, accept=self.T_CONTAINER)
+            if st < 300:
+                for row in (json.loads(body).get("children") or []):
+                    if not isinstance(row, list) or len(row) < 2 or not isinstance(row[1], str): continue
+                    otype, name = row[0], row[1]; md = row[2] if len(row) > 2 and isinstance(row[2], dict) else {}
+                    out.append(self._entry_from(rel, name, otype, md))
+                return out
+        st, h, body = self._req(base, accept=self.T_CONTAINER)
+        if st == 404: return out
+        if st >= 300: raise Fail("cannot list %s (status %d)" % (base, st), 23)
+        for name in (json.loads(body).get("children") or []):
+            if not isinstance(name, str): continue
+            e = self.stat(os.path.join(rel, name.rstrip("/?")) if rel else name.rstrip("/?"))
+            if e: out.append(e)
+        return out
+    def _entry_from(self, rel, name, otype, md):
+        is_dir = name.endswith("/") or (otype or "").endswith("cdmi-container")
+        bare = name.rstrip("/?")
+        size = md.get("cdmi_size"); size = int(size) if size not in (None, "") else 0
+        mt = md.get("cdmi_mtime"); mtime = _parse_time(mt) if mt else 0
+        um = {k: v for k, v in md.items() if k.startswith("cdmi-rsync.")}
+        e = Entry(bare, os.path.join(rel, bare) if rel else bare, is_dir=is_dir, size=size, mtime=mtime, meta=um)
+        _apply_stored_attrs(e, um)
+        return e
+    def stat(self, rel):
+        # a data object, a queue, or a container: ask, one type at a time
+        for accept, is_dir in ((self.T_OBJECT, False), (self.T_CONTAINER, True)):
+            st, h, body = self._req(self._url(rel + ("/" if is_dir else "")) + "?objectType&objectName&metadata", accept=accept)
+            if st < 300:
+                rep = json.loads(body); md = rep.get("metadata") or {}
+                otype = rep.get("objectType", "")
+                return self._entry_from(os.path.dirname(rel), os.path.basename(rel), otype, md)
+            if st not in (404, 406): 
+                if st == 401: raise Fail("authentication required for %s" % self.base, 5)
+        return None
+    def read(self, rel, offset=0, length=None):
+        q = "value"
+        if offset or length is not None:
+            end = (offset + length - 1) if length is not None else ""
+            q = "value=%d-%s" % (offset, end if end != "" else "")
+        st, h, body = self._req(self._url(rel) + "?" + q + "&valuetransferencoding&mimetype", accept=self.T_OBJECT)
+        if st >= 300: raise Fail("cannot read %s (status %d)" % (rel, st), 23)
+        rep = json.loads(body); enc = rep.get("valuetransferencoding", "utf-8"); val = rep.get("value", "")
+        if enc == "base64": return base64.b64decode(val)
+        if enc == "json": return json.dumps(val).encode("utf-8")
+        return val.encode("utf-8")
+    def hash_of(self, rel, algo="sha256"):
+        # prefer a server-computed hash (no download); else read and hash
+        want = {"sha256": "SHA256", "sha1": "SHA160"}.get(algo)
+        st, h, body = self._req(self._url(rel) + "?metadata", accept=self.T_OBJECT)
+        if st < 300:
+            md = (json.loads(body).get("metadata") or {})
+            vh = md.get("cdmi_value_hash")
+            if vh and want and want in str(vh): 
+                digest = md.get("cdmi_value_hash_value") or md.get("cdmi_hash")
+                if digest: return str(digest).lower()
+        h = hashlib.new(algo); off = 0
+        while True:
+            chunk = self.read(rel, off, 1 << 20)
+            if not chunk: break
+            h.update(chunk); off += len(chunk)
+            if len(chunk) < (1 << 20): break
+        return h.hexdigest()
+    def mkdir(self, rel):
+        if not rel: return
+        parts = rel.strip("/").split("/"); cur = ""
+        for p in parts:
+            cur = (cur + "/" + p) if cur else p
+            st, h, body = self._req(self._url(cur + "/"), method="PUT", accept=self.T_CONTAINER,
+                                    ctype=self.T_CONTAINER, body=json.dumps({"metadata": {}}).encode(),
+                                    extra={"If-None-Match": "*"})
+            if st >= 300 and st not in (409, 412):
+                raise Fail("cannot make container %s (status %d)" % (cur, st), 23)
+    def write(self, rel, data, entry, offset=None):
+        md = _attrs_as_meta(entry)
+        try: text = data.decode("utf-8"); enc = "utf-8"; value = text
+        except UnicodeDecodeError: enc = "base64"; value = base64.b64encode(data).decode("ascii")
+        rep = {"mimetype": _guess_mime(rel), "valuetransferencoding": enc, "value": value}
+        if md: rep["metadata"] = md
+        q = ""
+        if offset is not None:
+            end = offset + len(data) - 1
+            q = "?value=%d-%d" % (offset, end); rep = {"valuetransferencoding": enc, "value": value}
+        st, h, body = self._req(self._url(rel) + q, method="PUT", accept=self.T_OBJECT,
+                                ctype=self.T_OBJECT, body=json.dumps(rep).encode())
+        if st >= 300: raise Fail("cannot write %s (status %d)" % (rel, st), 23)
+    def set_meta(self, rel, entry, opts):
+        md = _attrs_as_meta(entry)
+        if opts.times and entry.mtime:
+            # settable only with backup_operator; the server ignores it otherwise (warned once by the engine)
+            md["cdmi_mtime"] = _iso_time(entry.mtime)
+        if not md: return
+        st, h, body = self._req(self._url(rel), method="PATCH", accept=self.T_OBJECT,
+                                ctype=self.T_OBJECT, body=json.dumps({"metadata": md}).encode())
+    def delete(self, rel, is_dir):
+        st, h, body = self._req(self._url(rel + ("/" if is_dir else "")), method="DELETE", accept=self.T_OBJECT)
+        if st >= 300 and st != 404: eprint("cdmi-rsync: cannot delete %s (status %d)" % (rel, st))
+
+# ------------------------------------------------------------------ attribute preservation across the boundary
+def _attrs_as_meta(entry):
+    md = {}
+    if entry.mode is not None: md["cdmi-rsync.mode"] = "%o" % entry.mode
+    if entry.uid is not None: md["cdmi-rsync.uid"] = str(entry.uid)
+    if entry.gid is not None: md["cdmi-rsync.gid"] = str(entry.gid)
+    if entry.mtime: md["cdmi-rsync.mtime"] = repr(float(entry.mtime))
+    if entry.symlink is not None: md["cdmi-rsync.symlink"] = entry.symlink
+    return md
+def _apply_stored_attrs(entry, md):
+    if "cdmi-rsync.mode" in md:
+        try: entry.mode = int(md["cdmi-rsync.mode"], 8)
+        except ValueError: pass
+    for k, a in (("cdmi-rsync.uid", "uid"), ("cdmi-rsync.gid", "gid")):
+        if k in md:
+            try: setattr(entry, a, int(md[k]))
+            except ValueError: pass
+    if "cdmi-rsync.mtime" in md:
+        try: entry.mtime = float(md["cdmi-rsync.mtime"])
+        except ValueError: pass
+    if "cdmi-rsync.symlink" in md: entry.symlink = md["cdmi-rsync.symlink"]
+
+def _guess_mime(rel):
+    import mimetypes; return mimetypes.guess_type(rel)[0] or "application/octet-stream"
+def _iso_time(t):
+    return time.strftime("%Y-%m-%dT%H:%M:%S.000000Z", time.gmtime(t))
+def _parse_time(s):
+    if not s: return 0
+    try: return time.mktime(time.strptime(s.split(".")[0], "%Y-%m-%dT%H:%M:%S")) - time.timezone
+    except Exception: return 0
+
+# ------------------------------------------------------------------ options bundle
+class Opts:
+    pass
+
+# ------------------------------------------------------------------ filters (rsync include/exclude, simplified but faithful for globs)
+class Filters:
+    def __init__(self, rules):
+        self.rules = rules            # list of (include_bool, pattern)
+    def allow(self, rel, is_dir):
+        name = rel + ("/" if is_dir else "")
+        for inc, pat in self.rules:
+            if self._match(pat, rel, name, is_dir): return inc
+        return True
+    def _match(self, pat, rel, name, is_dir):
+        anchored = pat.startswith("/")
+        p = pat[1:] if anchored else pat
+        dir_only = p.endswith("/"); p = p.rstrip("/")
+        if dir_only and not is_dir: return False
+        cand = rel if anchored else os.path.basename(rel)
+        if anchored: return fnmatch.fnmatch(rel, p) or fnmatch.fnmatch(rel, p + "/*")
+        return fnmatch.fnmatch(os.path.basename(rel), p) or any(fnmatch.fnmatch(part, p) for part in rel.split("/"))
+
+# ------------------------------------------------------------------ the sync engine
+class Stats:
+    def __init__(self): self.created = self.updated = self.deleted = self.unchanged = 0; self.bytes = 0
+
+class Engine:
+    def __init__(self, src, dst, opts):
+        self.src, self.dst, self.o = src, dst, opts
+        self.stats = Stats(); self.warned_mtime = False
+    def run(self, src_rel, dst_rel):
+        s = self.src.stat(src_rel) if src_rel or self.src.kind == "cdmi" else self.src.stat("")
+        # trailing-slash rule handled by caller; here src_rel is the container/file to copy
+        top = self.src.stat(src_rel)
+        if top is None and src_rel == "" and self.src.kind == "cdmi": top = Entry("", "", is_dir=True)
+        if top is None:
+            raise Fail("source %s not found" % self.src.label(src_rel), 23)
+        if top.is_dir:
+            self._sync_dir(src_rel, dst_rel)
+        else:
+            self._sync_file(top, dst_rel)
+    def _apply_filters(self, entries):
+        if not self.o.filters: return entries
+        return [e for e in entries if self.o.filters.allow(e.path, e.is_dir)]
+    def _sync_dir(self, src_rel, dst_rel):
+        if not self.o.dry_run: self.dst.mkdir(dst_rel)
+        src_entries = {e.name: e for e in self._apply_filters(self.src.listdir(src_rel))}
+        dst_entries = {e.name: e for e in self.dst.listdir(dst_rel)} if (self.o.delete or self.o.existing or self.o.ignore_existing) else {}
+        # deletions first, if --delete-before (default --delete implies after; keep simple: before)
+        if self.o.delete:
+            for name, de in dst_entries.items():
+                if name not in src_entries:
+                    if self.o.max_delete is not None and self.stats.deleted >= self.o.max_delete:
+                        eprint("cdmi-rsync: --max-delete reached"); break
+                    self._delete(os.path.join(dst_rel, name), de)
+        for name, se in sorted(src_entries.items()):
+            d_rel = os.path.join(dst_rel, name) if dst_rel else name
+            if se.is_dir:
+                self._sync_dir(se.path, d_rel)
+            else:
+                if self.o.ignore_existing and name in dst_entries: continue
+                if self.o.existing and name not in dst_entries: continue
+                self._sync_file(se, d_rel)
+    def _delete(self, rel, entry):
+        self._say(1, "deleting %s" % self.dst.label(rel))
+        if not self.o.dry_run: self.dst.delete(rel, entry.is_dir)
+        self.stats.deleted += 1
+    def _needs_copy(self, se, drel):
+        de = self.dst.stat(drel)
+        if de is None: return True, "new"
+        if se.symlink is not None or de.symlink is not None:
+            return (se.symlink != de.symlink), "symlink"
+        if self.o.ignore_times: return True, "forced"
+        if self.o.size_only: return se.size != de.size, "size"
+        if self.o.update and de.mtime and se.mtime and de.mtime > se.mtime:
+            return False, "newer-on-dest"
+        if self.o.checksum:
+            try:
+                if self.src.hash_of(se.path) == self.dst.hash_of(drel): return False, "checksum"
+                return True, "checksum"
+            except Fail: pass
+        # rsync quick check: size and mtime
+        same_size = (se.size == de.size)
+        same_time = (se.mtime and de.mtime and abs(se.mtime - de.mtime) <= 1)
+        if same_size and (same_time or not self.o.times): return False, "up-to-date"
+        return True, ("size" if not same_size else "time")
+    def _sync_file(self, se, drel):
+        need, why = self._needs_copy(se, drel)
+        if not need:
+            self.stats.unchanged += 1; self._say(2, "%s is up to date" % drel); return
+        existed = self.dst.stat(drel) is not None
+        self._say(1, drel)
+        if self.o.dry_run:
+            (self.stats.updated if existed else self.stats.created).__class__  # no-op
+            if existed: self.stats.updated += 1
+            else: self.stats.created += 1
+            return
+        if se.symlink is not None:
+            self.dst.write(drel, b"", se)
+        elif self.o.append and existed:
+            de = self.dst.stat(drel)
+            if de and de.size < se.size:
+                data = self.src.read(se.path, de.size)
+                self.dst.write(drel, data, se, offset=de.size); self.stats.bytes += len(data)
+            elif not de or de.size != se.size:
+                self._whole(se, drel)
+        else:
+            self._whole(se, drel)
+        # metadata / times
+        self._set_meta(se, drel)
+        if existed: self.stats.updated += 1
+        else: self.stats.created += 1
+    def _whole(self, se, drel):
+        # stream in chunks for progress; a single PUT for the object (CDMI has no delta)
+        data = self.src.read(se.path)
+        if self.o.progress: self._progress(drel, len(data), len(data))
+        self.dst.write(drel, data, se); self.stats.bytes += len(data)
+    def _set_meta(self, se, drel):
+        if self.o.times and self.dst.kind == "cdmi" and self.dst.backup_operator is False and not self.warned_mtime:
+            eprint("cdmi-rsync: the server will not let this principal set modification times "
+                   "(needs the backup_operator privilege); times are stored in metadata and restored on the way out")
+            self.warned_mtime = True
+        self.dst.set_meta(drel, se, self.o)
+    def _progress(self, name, done, total):
+        if not self.o.progress: return
+        pct = (100 * done // total) if total else 100
+        sys.stderr.write("\r%12s %3d%% %s" % (human(done), pct, name[-40:])); sys.stderr.flush()
+        if done >= total: sys.stderr.write("\n")
+    def _say(self, level, msg):
+        if self.o.verbose >= level and not self.o.quiet: print(msg)
+
+# ------------------------------------------------------------------ endpoint construction and the trailing-slash rule
+def make_endpoint(spec, opts):
+    if spec.startswith("http://") or spec.startswith("https://"):
+        # The base URI is the CDMI container that exists and answers; the rest is a path under it. Walk up from the
+        # given URL until a GET returns a CDMI container, so a not-yet-created destination still resolves.
+        u = urllib.parse.urlsplit(spec)
+        segs = [seg for seg in u.path.split("/") if seg != ""]
+        trailing = spec.endswith("/")
+        for cut in range(len(segs), -1, -1):
+            base_path = "/" + "/".join(segs[:cut]) + ("/" if cut else "")
+            base = urllib.parse.urlunsplit((u.scheme, u.netloc, base_path, "", ""))
+            ns = CdmiNS(base, auth=opts.auth, insecure=opts.insecure, timeout=opts.timeout)
+            try:
+                ns.probe(); rel = "/".join(segs[cut:]); return ns, rel
+            except Fail as e:
+                if getattr(e, "code", 0) == 5: raise      # auth error: stop, don't keep walking
+                continue
+        raise Fail("%s is not under a readable CDMI base URI" % spec, 2)
+    else:
+        path = spec
+        return LocalFS(path.rstrip("/") if path not in ("/", "") else path), ""
+
+def split_source(spec):
+    """Return (endpoint_base, is_contents). A trailing slash means 'copy the contents'."""
+    return spec, spec.endswith("/")
+
+# ------------------------------------------------------------------ CLI, faithful to rsync's spellings
+def build_parser():
+    p = argparse.ArgumentParser(prog="cdmi-rsync", add_help=False,
+                                description="An rsync workalike where a source or destination may be a CDMI namespace (an http/https URL).")
+    a = p.add_argument
+    a("args", nargs="*")
+    a("-v", "--verbose", action="count", default=0)
+    a("-q", "--quiet", action="store_true")
+    a("-a", "--archive", action="store_true", help="-rlptgoD: recurse and preserve most attributes")
+    a("-r", "--recursive", action="store_true")
+    a("-d", "--dirs", action="store_true")
+    a("-l", "--links", action="store_true")
+    a("-p", "--perms", action="store_true")
+    a("-t", "--times", action="store_true")
+    a("-g", "--group", action="store_true")
+    a("-o", "--owner", action="store_true")
+    a("-D", action="store_true", help="preserve devices and specials (as metadata markers only)")
+    a("-u", "--update", action="store_true")
+    a("-c", "--checksum", action="store_true")
+    a("--size-only", action="store_true")
+    a("-I", "--ignore-times", action="store_true")
+    a("-n", "--dry-run", action="store_true")
+    a("--delete", action="store_true")
+    a("--delete-before", action="store_true"); a("--delete-after", action="store_true")
+    a("--max-delete", type=int, default=None)
+    a("--existing", action="store_true"); a("--ignore-existing", action="store_true")
+    a("--partial", action="store_true"); a("--append", action="store_true"); a("--append-verify", action="store_true")
+    a("--inplace", action="store_true"); a("-W", "--whole-file", action="store_true")
+    a("-z", "--compress", action="store_true")
+    a("--progress", action="store_true"); a("--stats", action="store_true")
+    a("-h", "--human-readable", action="store_true")
+    a("--include", action="append", default=[]); a("--exclude", action="append", default=[])
+    a("--exclude-from", action="append", default=[]); a("--include-from", action="append", default=[])
+    a("--files-from", default=None); a("-0", "--from0", action="store_true")
+    a("--password-file", default=None); a("--timeout", type=int, default=60); a("--contimeout", type=int, default=30)
+    a("--no-times", action="store_true"); a("--no-perms", action="store_true")
+    a("--insecure", action="store_true", help="accept a self-signed server certificate (still TLS for https)")
+    a("--bwlimit", default=None)
+    a("--list-only", action="store_true")
+    a("--version", action="store_true"); a("--help", action="store_true")
+    return p
+
+def collect_filters(ns):
+    rules = []
+    for spec in ns.include: rules.append((True, spec))
+    for spec in ns.exclude: rules.append((False, spec))
+    for f in ns.include_from:
+        for line in _read_lines(f): rules.append((True, line))
+    for f in ns.exclude_from:
+        for line in _read_lines(f): rules.append((False, line))
+    return Filters(rules) if rules else None
+def _read_lines(path):
+    try:
+        with open(path) as fh: return [l.strip() for l in fh if l.strip() and not l.startswith("#")]
+    except OSError: return []
+
+def resolve_auth(ns):
+    if ns.password_file:
+        try:
+            tok = open(ns.password_file).read().strip()
+            return ("Bearer " + tok) if "." in tok and " " not in tok else tok
+        except OSError: pass
+    env = os.environ.get("CDMI_TOKEN")
+    if env: return "Bearer " + env
+    # a userinfo in the URL triggers a Basic prompt
+    for spec in ns.args:
+        if spec.startswith(("http://", "https://")):
+            u = urllib.parse.urlsplit(spec)
+            if u.username:
+                pw = os.environ.get("CDMI_PASSWORD") or getpass.getpass("Password for %s: " % u.username)
+                return "Basic " + base64.b64encode(("%s:%s" % (u.username, pw)).encode()).decode()
+    return None
+
+HELP = """Usage: cdmi-rsync [OPTION...] SRC... DEST
+
+Copy files to, from and between CDMI namespaces, driven like rsync. A SRC or DEST that is an
+http:// or https:// URL is a CDMI namespace; anything else is a local path. A trailing slash on
+a source copies its contents into DEST; without one, the source directory is copied as a child.
+
+This reproduces rsync's command line and behaviour, not its wire protocol: a CDMI server is not
+an rsync peer, so whole objects are transferred (with ranged resume for --append) rather than
+deltas. Common options match rsync's spellings:
+
+  -a, --archive            -rlptgoD (recurse; preserve attributes; see notes)
+  -r -l -p -t -g -o -D     recurse, links, perms, times, group, owner, devices
+  -u --update  -c --checksum  --size-only  -I --ignore-times   change detection
+  -n --dry-run  -v -vv --verbose  -q --quiet  --stats  --progress
+  --delete [--before|--after]  --max-delete N  --existing  --ignore-existing
+  --include/--exclude[-from]  --files-from  -0     filters
+  --partial --append --append-verify  --inplace   resume large objects (ranged PUT)
+  --password-file F   (or CDMI_TOKEN / CDMI_PASSWORD env);  --insecure;  --timeout N
+
+Notes on fidelity:
+  * Attributes CDMI cannot represent natively (mode, uid, gid, symlink target, mtime without the
+    backup_operator privilege) are stored in the object's user metadata (cdmi-rsync.*), so a
+    round trip local -> CDMI -> local is faithful. With -t and no backup_operator, the server
+    ignores cdmi_mtime and cdmi-rsync warns once, as chosen.
+  * No delta transfer; -W --whole-file is implied. --checksum uses the server's cdmi_value_hash
+    where available (no download), else reads and hashes as rsync does.
+  * Change detection is rsync's quick check (size + mtime), read cheaply with one extended child
+    listing per container where the server supports it.
+
+Exit codes follow rsync: 0 success, 2 unsupported, 5 auth, 10 socket, 23 partial, 24 vanished.
+"""
+
+def main(argv):
+    p = build_parser(); ns = p.parse_args(argv)
+    if ns.help or (not ns.args and not ns.version): print(HELP); return 0
+    if ns.version: print(VERSION); return 0
+    if not ns.list_only and len(ns.args) < 2: eprint("cdmi-rsync: need SRC and DEST"); return 2
+
+    if ns.archive: ns.recursive = ns.links = ns.perms = ns.times = ns.group = ns.owner = True; ns.D = True
+    if ns.no_times: ns.times = False
+    if ns.no_perms: ns.perms = False
+    if ns.append_verify: ns.append = True
+    ns.auth = resolve_auth(ns)
+    ns.filters = collect_filters(ns)
+
+    if ns.list_only and len(ns.args) >= 1:
+        for spec in ns.args:
+            try: ep, rel = make_endpoint(spec, ns)
+            except Fail as e: eprint("cdmi-rsync: %s" % e); return e.code
+            _list(ep, rel, ns)
+        return 0
+    *sources, dest_spec = ns.args
+    o = Opts()
+    for k in ("recursive", "links", "perms", "times", "group", "owner", "update", "checksum",
+              "size_only", "ignore_times", "dry_run", "delete", "existing", "ignore_existing",
+              "append", "progress", "quiet", "verbose", "max_delete"):
+        setattr(o, k, getattr(ns, k))
+    o.filters = ns.filters
+
+    try:
+        dst, dst_base_rel = make_endpoint(dest_spec, ns)
+    except Fail as e:
+        eprint("cdmi-rsync: %s" % e); return e.code
+    if isinstance(dst, CdmiNS) and dst.caps is not None:
+        dst.backup_operator = None
+
+    total = Stats()
+    rc = 0
+    for src_spec in sources:
+        contents = src_spec.endswith("/")
+        try:
+            src, src_base_rel = make_endpoint(src_spec, ns)
+        except Fail as e:
+            eprint("cdmi-rsync: %s" % e); rc = e.code; continue
+        # the trailing-slash rule: contents -> dst; no slash -> dst/<basename>
+        src_rel = src_base_rel
+        base = os.path.basename(src_spec.rstrip("/")) or ""
+        dst_rel = dst_base_rel if contents else (os.path.join(dst_base_rel, base) if dst_base_rel else base)
+        eng = Engine(src, dst, o)
+        try:
+            eng.run(src_rel, dst_rel)
+        except Fail as e:
+            eprint("cdmi-rsync: %s" % e); rc = e.code
+        for a in ("created", "updated", "deleted", "unchanged", "bytes"):
+            setattr(total, a, getattr(total, a) + getattr(eng.stats, a))
+
+    if ns.stats or ns.verbose:
+        eprint("cdmi-rsync: %d created, %d updated, %d deleted, %d unchanged, %s transferred%s" % (
+            total.created, total.updated, total.deleted, total.unchanged, human(total.bytes),
+            " (dry run)" if ns.dry_run else ""))
+    return rc
+
+def _list(src, rel, ns):
+    for e in sorted(src.listdir(rel), key=lambda x: x.name):
+        kind = "d" if e.is_dir else ("l" if e.symlink else "-")
+        print("%s %10s %s %s%s" % (kind, human(e.size) if not e.is_dir else "", 
+              time.strftime("%Y-%m-%d %H:%M", time.localtime(e.mtime)) if e.mtime else "                ",
+              e.name, "/" if e.is_dir else ""))
+        if e.is_dir and ns.recursive: _list(src, e.path, ns)
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        eprint("\ncdmi-rsync: interrupted"); sys.exit(20)

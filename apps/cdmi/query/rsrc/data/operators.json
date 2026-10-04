@@ -1,0 +1,15 @@
+[
+  { "v": "contains", "label": "contains", "tok": "contains" },
+  { "v": "!contains", "label": "does not contain", "tok": "!contains" },
+  { "v": "starts", "label": "starts with", "tok": "starts" },
+  { "v": "ends", "label": "ends with", "tok": "ends" },
+  { "v": "==", "label": "is", "tok": "==" },
+  { "v": "!=", "label": "is not", "tok": "!=" },
+  { "v": "=~", "label": "matches regex", "tok": "=~" },
+  { "v": "tag", "label": "has tag", "tok": "tag" },
+  { "v": "*", "label": "exists", "tok": "*" },
+  { "v": ">=", "label": "≥", "tok": ">=" },
+  { "v": "<=", "label": "≤", "tok": "<=" },
+  { "v": ">", "label": ">", "tok": ">" },
+  { "v": "<", "label": "<", "tok": "<" }
+]

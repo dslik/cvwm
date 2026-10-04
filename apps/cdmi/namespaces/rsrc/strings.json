@@ -1,0 +1,23 @@
+{
+  "title": "namespaces",
+  "origin-placeholder": "https://host:port",
+  "discover": "Discover",
+  "reading": "Reading …",
+  "no-namespaces-prefix": "No namespaces are advertised at ",
+  "no-namespaces-suffix": "/.well-known/cdmi/cdmi_namespaces/.",
+  "tag-tls": "TLS",
+  "tag-not-https": "not https",
+  "tag-same-origin": "same origin",
+  "tag-other-origin": "other origin",
+  "tag-locked": "sign in to read",
+  "no-base": "(no base URI)",
+  "reason-default": "this reference does not lead to a base URI",
+  "mounts-https-only": "cvwm mounts only https: base URIs",
+  "mounts-same-origin": "cvwm mounts only same-origin base URIs (spec 302)",
+  "mounted": "Mounted",
+  "mount": "Mount",
+  "origin-help": "A server origin is an https: URL, for example https://cdmi.example.local:9443",
+  "not-supported": "this desktop does not support namespace discovery",
+  "could-not-read-prefix": "Could not read the namespaces at ",
+  "no-answer": "The server did not answer."
+}

@@ -1,0 +1,8 @@
+{
+  "container": "application/cdmi-container",
+  "object": "application/cdmi-object",
+  "queue": "application/cdmi-queue",
+  "capability": "application/cdmi-capability",
+  "domain": "application/cdmi-domain",
+  "json": "application/json"
+}

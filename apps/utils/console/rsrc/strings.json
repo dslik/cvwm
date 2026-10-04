@@ -1,0 +1,21 @@
+{
+  "errors": "Errors",
+  "warnings": "Warnings",
+  "info": "Info",
+  "log": "Log",
+  "debug": "Debug",
+  "network": "Network",
+  "network-title": "Requests made with fetch(), with status and time. Successful ones are at Debug level.",
+  "copy": "Copy",
+  "copy-title": "Copy what is shown to the clipboard",
+  "copy-failed": "Copy failed",
+  "clear": "Clear",
+  "all-windows": "All windows",
+  "from-label": "Show entries from",
+  "filter-placeholder": "filter text",
+  "filter-label": "Filter text",
+  "run-in": "Run in",
+  "code-placeholder": "JavaScript to run in that window; Enter runs it, Up and Down recall",
+  "empty-filtered": "Nothing to show with these filters.",
+  "need-cvwm": "This program needs cvwm: open it from a desktop window."
+}

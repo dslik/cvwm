@@ -1,0 +1,10 @@
+{
+  "title": "mdviewer",
+  "open": "Open…",
+  "openTitle": "Open a Markdown object from a disk",
+  "openFile": "Open a Markdown file",
+  "document": "document",
+  "couldNotOpen": "Could not open",
+  "redirectNonHttps": "redirected to a non-https URI",
+  "notUtf8": "this object is not UTF-8 text"
+}

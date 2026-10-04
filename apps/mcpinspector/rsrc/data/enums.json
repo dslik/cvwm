@@ -1,0 +1,4 @@
+{
+  "representation": ["cdmi-object", "cdmi-container", "cdmi-queue", "cdmi-domain", "cdmi-capability"],
+  "mode": ["replace", "replace-fields", "merge"]
+}

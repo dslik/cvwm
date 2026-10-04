@@ -1,0 +1,12 @@
+[
+  ["Template…", ""],
+  ["Read a container", "get-container"],
+  ["Read an object", "get-object"],
+  ["List children (extended)", "list"],
+  ["Create a container", "put-container"],
+  ["Create a text object", "put-object"],
+  ["Set an ACL", "put-acl"],
+  ["Delete", "delete"],
+  ["Server capabilities", "caps"],
+  ["Namespaces (well-known)", "nswk"]
+]

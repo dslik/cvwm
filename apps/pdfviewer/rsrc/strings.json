@@ -1,0 +1,10 @@
+{
+  "title": "pdfviewer",
+  "open": "Open…",
+  "openTitle": "Open a PDF object from a disk",
+  "openFile": "Open a PDF file",
+  "couldNotOpen": "Could not open",
+  "document": "document",
+  "redirectNonHttps": "redirected to a non-https URI",
+  "objectIsJson": "this object is JSON, not a PDF"
+}
