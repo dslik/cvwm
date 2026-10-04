@@ -2,6 +2,8 @@
 
 The CDMI Virtual Window Manager: an X11/FVWM-style desktop for CDMI 3 servers, in plain JavaScript, with a suite of applications for browsing and managing a server.
 
+<img width="2560" height="1600" alt="desktop" src="https://github.com/user-attachments/assets/dfbd723b-fc84-41b3-940b-a2742fba59ab" />
+
 ```
 cvwm.js               the desktop: window manager, CDMI client, container browser
 index.html            a handful of lines that load cvwm.js
