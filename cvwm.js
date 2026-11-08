@@ -1,6 +1,6 @@
 /*!
  * cvwm - the CDMI Virtual Window Manager: an X11 / FVWM style desktop for CDMI 3 servers, in one plain JavaScript file.
- * cvwm version: 2.103.0
+ * cvwm version: 2.105.0
  *
  *   <!doctype html><meta charset="utf-8"><title>cvwm</title><script src="cvwm.js"></script>
  *
@@ -72,7 +72,7 @@
   /* A value is returned only where a read selects it, so reading an object's value names these fields. */
   var VALUE_FIELDS = '?objectType&objectName&objectID&mimetype&metadata&valuetransferencoding&valuerange&value';
   var MOUNTS_KEY = 'cvwm.mounts', VIEW_KEY = 'cvwm.view';
-  var VERSION = '2.103.0';                 // the running build; a change purges cvwm's saved state (see below)
+  var VERSION = '2.105.0';                 // the running build; a change purges cvwm's saved state (see below)
   var VERSION_KEY = 'cvwm.version';
 
   /* Saved state is namespaced under "cvwm." in localStorage: mounts, the icon/list view choice, known hosts and
@@ -669,6 +669,7 @@
     system: FOLDER.replace('FILL', '#cfcfcf'),
     app: FOLDER.replace('FILL', '#e6cf8a') + '<path d="M11 21L15 24.5L11 28"/><path d="M18 28H25"/>',
     object: DOC + '<path d="M14 17H27M14 22H27M14 27H22"/>',
+    font: DOC + '<text x="20.5" y="29" font-family="Georgia,\'Times New Roman\',serif" font-style="italic" font-weight="700" font-size="20" fill="#000" stroke="none" text-anchor="middle">A</text><path d="M14 32H27"/>',
     script: DOC + '<path d="M17 18L13 23L17 28M24 18L28 23L24 28"/>',
     image: DOC + '<path d="M13 30L18 22L22 27L25 24L28 30Z" fill="#9ab"/><circle cx="17" cy="17" r="1.6"/>',
     pdf: DOC + '<rect x="13" y="16" width="15" height="10" fill="#c06077"/><path d="M14 31H27"/>',
@@ -774,6 +775,8 @@
     '.fv-rs.sw:before{right:0;bottom:2px;width:2px;height:5px}.fv-rs.sw:after{left:2px;top:0;width:5px;height:2px}',
     '.fv-rs.se:before{left:0;bottom:2px;width:2px;height:5px}.fv-rs.se:after{right:2px;top:0;width:5px;height:2px}',
     '.fv-max .fv-rs{display:none}',
+    '.fv-fixed .fv-rs{display:none}.fv-fixed .fv-tb.x{display:none}',
+    '.fv-fixh .fv-rs.n,.fv-fixh .fv-rs.s,.fv-fixh .fv-rs.nw,.fv-fixh .fv-rs.ne,.fv-fixh .fv-rs.sw,.fv-fixh .fv-rs.se{display:none}.fv-fixh .fv-tb.x{display:none}',
     '.fv-shield{position:absolute;inset:0;z-index:100000;display:none}',
     /* capture: the region-select overlay */
     '.fv-capsel{position:fixed;inset:0;z-index:100001;cursor:crosshair;background:rgba(0,0,0,.12)}',
@@ -1415,7 +1418,7 @@
     if (o.center) { this.x = Math.round((vw() - this.w) / 2); this.y = Math.round((vh() - this.h) / 3); }
     else { var c = WM.cascade++ % 8; this.x = 60 + c * 28; this.y = 40 + c * 26; }
     this.x = clamp(this.x, 0, Math.max(0, vw() - this.w)); this.y = clamp(this.y, 0, Math.max(0, vh() - this.h));
-    this.iconified = false; this.maxed = null; this.aspect = 0; this.before = WM.focused;       // a dialog gives focus back to the window it interrupted
+    this.iconified = false; this.maxed = null; this.aspect = 0; this.fixed = false; this.lockH = false; this.hidden = false; this.pendingReveal = false; this.before = WM.focused;   // a dialog gives focus back to the window it interrupted
 
     this.tt = h('div', { class: 'fv-tt', text: this.title });
     this.dropLabel = h('span', { text: '' });
@@ -1484,7 +1487,11 @@
 
     this.wid = 'win' + (++winUid);
     view.appendChild(this.el); WM.wins.push(this);
-    this.apply(); this.raise(); focusWin(this);
+    this.apply();
+    // A window may start hidden (an app launched with no document that will show a dialog first); it is revealed on the
+    // app's first signal, or kept hidden if the app asks (CTX.visible(false)). Otherwise it shows and takes focus now.
+    if (o.hidden) { this.hidden = true; this.pendingReveal = true; this.el.style.display = 'none'; }
+    else { this.raise(); focusWin(this); }
   }
   Win.prototype.apply = function () {
     var s = this.el.style;
@@ -1501,7 +1508,7 @@
     if (this.aspect) { this.h = clamp(this.heightForWidth(this.w), this.minH, vh()); this.w = clamp(Math.round((this.h - TITLEBAR - CHROME) * this.aspect) + CHROME, this.minW, vw()); this.apply(); changed(); }
   };
   Win.prototype.resizeTo = function (w, hgt) {
-    if (this.maxed || !(w > 0) || !(hgt > 0)) return;
+    if (this.maxed || this.fixed || !(w > 0) || !(hgt > 0)) return;
     this.w = clamp(Math.round(w), this.minW, vw());
     this.h = this.aspect ? clamp(this.heightForWidth(this.w), this.minH, vh()) : clamp(Math.round(hgt), this.minH, vh());
     this.x = clamp(this.x, 0, Math.max(0, vw() - this.w)); this.y = clamp(this.y, 0, Math.max(0, vh() - this.h));
@@ -1517,8 +1524,16 @@
     var self = this, ox = this.x, oy = this.y;
     dragSession(ev, 'move', function (dx, dy) { self.x = ox + dx; self.y = clamp(oy + dy, -4, vh() - 30); self.apply(); });
   };
+  Win.prototype.setFixed = function (on) { this.fixed = !!on; this.el.classList.toggle('fv-fixed', this.fixed); };
+  Win.prototype.setFixedHeight = function (on) { this.lockH = !!on; this.el.classList.toggle('fv-fixh', this.lockH); };   // height locked, width still resizable
+  Win.prototype.setVisible = function (on) {                                   // an app shows/hides its own window (hidden-until-ready viewers)
+    on = !!on; this.hidden = !on; this.pendingReveal = false;
+    this.el.style.display = on ? '' : 'none';
+    if (on) { this.raise(); focusWin(this, true); }
+  };
   Win.prototype.startResize = function (ev, dir) {
-    if (this.maxed) return;
+    if (this.maxed || this.fixed) return;
+    if (this.lockH) { dir = dir.replace(/[ns]/g, ''); if (!dir) return; }     // height is locked: only the side (e/w) grips act
     var self = this, o = { x: this.x, y: this.y, w: this.w, h: this.h };
     dragSession(ev, dir + '-resize', function (dx, dy) {
       if (dir.indexOf('e') >= 0) self.w = Math.max(self.minW, o.w + dx);
@@ -1533,6 +1548,7 @@
     });
   };
   Win.prototype.toggleMax = function () {
+    if (this.fixed || this.lockH) return;
     if (this.maxed) { var m = this.maxed; this.x = m.x; this.y = m.y; this.w = m.w; this.h = m.h; this.maxed = null; }
     else {
       this.maxed = { x: this.x, y: this.y, w: this.w, h: this.h };
@@ -3804,7 +3820,7 @@
         'has:function(c,i){return E(c,i)!==undefined;}};}';
       var doc = '<!doctype html><html><head><meta charset="utf-8"><base href="' + containerURL.replace(/"/g, '%22') + '"><title>' + label.replace(/[<&]/g, '') + '</title>' +
         '<style>' + SCROLLBAR_CSS + '\nhtml,body{margin:0;height:100%;background:#000;color:#ddd}</style><script>(function(){var D=parent.cvwm,c=' + json + ';' +
-        'c.setTitle=function(t){D.app(c.id,"title",String(t))};c.resize=function(w,h){D.app(c.id,"resize",[+w,+h])};c.aspect=function(r){D.app(c.id,"aspect",+r||0)};c.setDirty=function(d){D.app(c.id,"dirty",!!d)};c.close=function(){D.app(c.id,"close")};c.open=function(u){D.app(c.id,"open",String(u))};' +
+        'c.setTitle=function(t){D.app(c.id,"title",String(t))};c.resize=function(w,h){D.app(c.id,"resize",[+w,+h])};c.fixed=function(w,h){D.app(c.id,"fixed",[+w,+h])};c.fixedHeight=function(w,h){D.app(c.id,"fixheight",[+w,+h])};c.visible=function(v){D.app(c.id,"visible",!!v)};c.aspect=function(r){D.app(c.id,"aspect",+r||0)};c.setDirty=function(d){D.app(c.id,"dirty",!!d)};c.close=function(){D.app(c.id,"close")};c.open=function(u){D.app(c.id,"open",String(u))};' +
         'D.capture(window,c.id);c.desktop=D;c.net=D.netFor(c.id);var p=D.app(c.id,"process");if(p){c.argv=p.argv;c.cwd=p.cwd;c.stdout=p.stdout;c.stderr=p.stderr;c.shell=p.shell;c.exit=function(n){D.app(c.id,"exit",n|0)};}' +
         mkMgr +
         'function run(){var s=document.createElement("script");s.src=c.__entry;(document.body||document.documentElement).appendChild(s);}' +
@@ -3812,7 +3828,9 @@
         'if(c.__hasRsrc){Promise.all([D.loadRsrc(c.__appFork),c.__sysFork?D.loadRsrc(c.__sysFork).catch(function(){return {};}):Promise.resolve({})]).then(function(r){c.rsrc=mkMgr(r[0]);c.sys={rsrc:mkMgr(r[1])};},function(){c.rsrc=mkMgr({});c.sys={rsrc:mkMgr({})};}).then(run);}else{run();}' +
         '})();<\/script></head><body></body></html>';
       var frame = h('iframe', { title: label, allow: 'fullscreen' });        // so an application may present full screen
-      var w = new Win({ title: label, icon: 'app', w: 720, h: 420, minW: 260, minH: 140, content: frame, onClose: function () { delete apps[id]; URL.revokeObjectURL(blob); if (proc && proc.onExit) { try { proc.onExit(w.exitCode || 0); } catch (e) { console.error(e); } } } });
+      var noDoc = !(extra && extra.start);                                    // launched with no document: start hidden, reveal on the app's first signal (below)
+      var w = new Win({ title: label, icon: 'app', w: 720, h: 420, minW: 260, minH: 140, hidden: noDoc, content: frame, onClose: function () { delete apps[id]; URL.revokeObjectURL(blob); if (proc && proc.onExit) { try { proc.onExit(w.exitCode || 0); } catch (e) { console.error(e); } } } });
+      if (noDoc) setTimeout(function () { if (w.pendingReveal) w.setVisible(true); }, 2000);   // safety net: reveal a hidden app that never signalled and never asked to stay hidden
       w.process = proc || null;
       w.extraMenu = function () { return [{ label: 'Browse contents', action: function () { openContainer(containerURL, { browse: true }); } }, { label: 'Restart', action: function () { frame.srcdoc = doc; } }]; };
       apps[id] = w; w.containerURI = containerURL;
@@ -4343,7 +4361,7 @@
       var atRootHere = self.disk && parentURL === self.disk.base;
       var sys = c.kind === 'container' && /^cdmi_/.test(bare) && (atRootHere || bare === 'cdmi_snapshots');
       var ic = c.kind === 'container' ? (sys ? 'system' : 'container') : c.kind === 'reference' ? 'reference' : c.kind === 'queue' ? 'queue'
-        : /\.pdf$/i.test(bare) ? 'pdf' : /\.(m?js|json|sh|py|css|html?)$/i.test(bare) ? 'script' : /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(bare) ? 'image' : 'object';
+        : /\.pdf$/i.test(bare) ? 'pdf' : /\.(ttf|otf|woff2?|ttc)$/i.test(bare) ? 'font' : /\.(m?js|json|sh|py|css|html?)$/i.test(bare) ? 'script' : /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(bare) ? 'image' : 'object';
       var pic = h('i', { html: icon(ic, px), style: 'display:flex' }), picWrap = h('span', { class: 'fv-pic' }, [pic]), kindCell = asList ? h('span', { class: 'dim', text: typeLabel(c) }) : null;
       var nameEl = h('span', { class: 'fv-name', text: c.name });
       var modCell = asList ? h('span', { class: 'dim', text: whenLabel(c.modified), title: c.modified || '' }) : null;
@@ -4739,8 +4757,12 @@
     app: function (id, what, arg) {              // called by the bootstrap inside each application iframe
       var w = apps[id]; if (!w) return;
       if (what === 'process') return w.process;
+      // A window that started hidden reveals itself on the app's first real signal -- unless the app is asking to stay
+      // hidden (visible:false), or is closing. So a hidden-until-ready viewer that calls CTX.visible(false) first stays
+      // dark until it chooses to show (e.g. after a font is picked); every other app reveals as soon as it sizes itself.
+      if (w.pendingReveal && what !== 'visible' && what !== 'close' && what !== 'exit') w.setVisible(true);
       if (what === 'exit') { w.exitCode = arg; w.close(true); }
-      else if (what === 'title') w.setTitle(arg); else if (what === 'close') w.close(true); else if (what === 'resize') w.resizeTo(arg[0], arg[1]); else if (what === 'aspect') w.setAspect(arg); else if (what === 'dirty') w.dirty = arg; else if (what === 'open') API.open(new URL(arg, CD.origin + '/').href);
+      else if (what === 'visible') w.setVisible(arg); else if (what === 'title') w.setTitle(arg); else if (what === 'close') w.close(true); else if (what === 'resize') w.resizeTo(arg[0], arg[1]); else if (what === 'fixed') { w.resizeTo(arg[0], arg[1]); w.setFixed(true); } else if (what === 'fixheight') { w.resizeTo(arg[0], arg[1]); w.setFixedHeight(true); } else if (what === 'aspect') w.setAspect(arg); else if (what === 'dirty') w.dirty = arg; else if (what === 'open') API.open(new URL(arg, CD.origin + '/').href);
     }
   };
 

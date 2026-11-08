@@ -171,5 +171,5 @@
   });
   try { D.body.classList.toggle('dark', localStorage.getItem('cvwm.dark') === 'on'); } catch (e) {}
 
-  if (c.resize) c.resize(560, 220);
+  if (c.fixed) c.fixed(560, 220); else if (c.resize) c.resize(560, 220);   // a settings panel: fixed size, not resizable
 })();

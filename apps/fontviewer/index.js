@@ -2,7 +2,10 @@
  * apps/fontviewer/index.js — view a font file.
  *
  * Opened with a font object as its start (a .ttf/.otf/.woff/.woff2, routed here by the desktop on a double-click, as
- * PDFs go to pdfviewer). It loads the bytes with the FontFace API and shows, in one scrolling split view:
+ * PDFs go to pdfviewer), or on its own -- then its window stays hidden and only the desktop's standard Open dialog
+ * shows, filtered to font files; choosing one reveals the window and loads it, and Cancel closes the viewer (which
+ * was opened only to show a font) without it ever appearing.
+ * It loads the bytes with the FontFace API and shows, in one scrolling split view:
  *   - a SAMPLE: a large, editable multi-line text box rendered in the font, with a numeric point size;
  *   - the CHARACTERS: a Unicode viewer -- the font's own repertoire, grouped by block, with a detail for the glyph.
  * The title bar and status bar carry the font's family, style, glyph count and format. Light and dark follow the
@@ -141,16 +144,16 @@
     'html,body{margin:0;height:100%}' +
     'body{background:var(--grey);color:var(--fg);font:13px/1.3 var(--sans);display:flex;flex-direction:column;-webkit-user-select:none;user-select:none}' +
     '*{box-sizing:border-box}' +
-    '#view{flex:1;min-height:0;overflow:auto;padding:12px 14px;display:flex;flex-direction:column}' +
-    '.hdr{display:flex;align-items:center;gap:10px;margin:14px 0 7px}.hdr:first-child{margin-top:0}.hdr h4{margin:0}.hdr .sp{flex:1}' +
-    'h4{font:700 11px var(--sans);letter-spacing:.04em;text-transform:uppercase;color:var(--dim)}' +
+    '#view{flex:1;min-height:0;overflow:hidden;padding:12px 14px;display:flex;flex-direction:column}' +     /* the window height is fixed; the two panes scroll, not the window */
+    '.hdr{display:flex;align-items:center;gap:10px;flex:none;margin:14px 0 7px}.hdr:first-child{margin-top:0}.hdr h4{margin:0}.hdr .sp{flex:1}' +
+    'h4{font:700 13px var(--sans);color:var(--fg)}' +                                                       /* same system font as the cvwm dialogs; not all-caps */
     '.szctl{display:flex;align-items:center;gap:6px;font:12px var(--sans);color:var(--fg)}' +
     '.szctl input{width:56px;height:24px;padding:0 6px;background:var(--field);color:var(--fg);font:13px var(--mono);text-align:right;border:2px solid;border-color:var(--dk) var(--lt) var(--lt) var(--dk)}' +
-    '#sample{flex:none;height:180px;min-height:90px;width:100%;resize:vertical;padding:8px 10px;background:var(--field);color:var(--fg);' +
+    '#sample{flex:none;height:150px;width:100%;resize:none;padding:8px 10px;background:var(--field);color:var(--fg);' +
       'font-family:' + FAM + ';line-height:1.18;border:2px solid;border-color:var(--dk) var(--lt) var(--lt) var(--dk);overflow:auto;white-space:pre-wrap;-webkit-user-select:text;user-select:text}' +
     '.chd select{height:24px;background:var(--field);color:var(--fg);font:12px var(--sans);border:2px solid;border-color:var(--dk) var(--lt) var(--lt) var(--dk);padding:0 6px}' +
     '.chd span{font:11px var(--sans);color:var(--dim)}' +
-    '#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(34px,1fr));gap:2px;background:var(--field);border:2px solid;border-color:var(--dk) var(--lt) var(--lt) var(--dk);padding:3px}' +
+    '#grid{flex:1;min-height:0;overflow:auto;align-content:start;display:grid;grid-template-columns:repeat(auto-fill,minmax(34px,1fr));gap:2px;background:var(--field);border:2px solid;border-color:var(--dk) var(--lt) var(--lt) var(--dk);padding:3px}' +
     '.cell{aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-family:' + FAM + ';font-size:20px;color:var(--fg);cursor:pointer;overflow:hidden}' +
     '.cell:hover{background:rgba(128,128,128,.22)}.cell.sel{background:var(--sel);color:#fff}' +
     '.empty{color:var(--dim);font:12px var(--sans);padding:10px}' +
@@ -162,7 +165,7 @@
   function el(t, a, kids) { var e = D.createElement(t); a = a || {}; for (var k in a) { if (k === 'text') e.textContent = a[k]; else e.setAttribute(k, a[k]); } (kids || []).forEach(function (n) { if (n) e.appendChild(n); }); return e; }
 
   /* ---- DOM ---- */
-  var sizeIn = el('input', { type: 'number', min: '6', max: '400', step: '1', value: String(DEFAULT_SIZE), 'aria-label': 'Sample size' });
+  var sizeIn = el('input', { type: 'text', inputmode: 'numeric', maxlength: '3', value: String(DEFAULT_SIZE), 'aria-label': 'Sample size' });
   var szctl = el('label', { class: 'szctl' }, [el('span', { text: 'Size' }), sizeIn, el('span', { text: 'px' })]);
   var sample = el('textarea', { id: 'sample', spellcheck: 'false', 'aria-label': 'Sample text' });
   sample.value = SAMPLE;
@@ -175,7 +178,7 @@
   D.body.appendChild(view); D.body.appendChild(status);
 
   var RANGES = null, probe = false;
-  function setSampleSize() { var n = Math.max(6, Math.min(400, +sizeIn.value || DEFAULT_SIZE)); sample.style.fontSize = n + 'px'; }
+  function setSampleSize() { var n = Math.max(6, Math.min(400, Math.round(+sizeIn.value) || DEFAULT_SIZE)); sample.style.fontSize = n + 'px'; return n; }
   function fillBlocks() {
     blockSel.textContent = '';
     var usable = BLOCKS.filter(function (b) { return probe || blockHas(RANGES, b); });
@@ -201,33 +204,25 @@
   }
 
   sizeIn.addEventListener('input', setSampleSize);
+  sizeIn.addEventListener('change', function () { sizeIn.value = String(setSampleSize()); });   // snap the field to the applied (clamped) value
   blockSel.addEventListener('change', renderGrid);
 
   function setDark(on) { D.body.classList.toggle('dark', !!on); }
   try { setDark(localStorage.getItem('cvwm.dark') === 'on'); } catch (e) {}
   window.addEventListener('storage', function (ev) { if (ev.key === 'cvwm.dark') setDark(ev.newValue === 'on'); });
 
-  function fileName() { var u = (c.startURI || '').split('?')[0].replace(/\/$/, ''); try { return decodeURIComponent(u.split('/').pop()); } catch (e) { return u.split('/').pop(); } }
-  function titleFromFile() { return fileName().replace(/\.(ttf|otf|woff2?|ttc)$/i, '').replace(/[_-]+/g, ' '); }
+  function nameFromURL(u) { u = (u || '').split('?')[0].replace(/\/$/, ''); try { return decodeURIComponent(u.split('/').pop()); } catch (e) { return u.split('/').pop(); } }
+  function titleFromName(n) { return String(n || 'font').replace(/\.(ttf|otf|woff2?|ttc)$/i, '').replace(/[_-]+/g, ' '); }
 
   /* ---- load ---- */
-  (async function () {
-    setSampleSize();
-    if (!c.startURI) { sMeta.textContent = 'No font to show.'; return; }
-    var bytes;
-    try {
-      var res = await fetch(c.startURI + '?value', { headers: Object.assign({ Accept: 'application/cdmi-object' }, c.headers || {}) });
-      if (!res.ok) throw new Error(res.status + '');
-      var rep = await res.json(), val = rep.value || '';
-      if (rep.valuetransferencoding === 'base64') { var bin = atob(val.replace(/\s+/g, '')); bytes = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); }
-      else bytes = new TextEncoder().encode(val);
-    } catch (e) { sMeta.textContent = 'Could not read the font: ' + (e && e.message || e); return; }
-
+  // Parse and render already-fetched bytes. RANGES and the status/title come from the font's own tables.
+  async function showFont(bytes, name) {
+    RANGES = null; probe = false;
     try { var face = new FontFace(FAM, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)); await face.load(); D.fonts.add(face); }
     catch (e) { sMeta.textContent = 'This file is not a usable font.'; return; }
     setSampleSize();
 
-    var family = titleFromFile(), style = '', glyphs = null, format = 'font';
+    var family = titleFromName(name), style = '', glyphs = null, format = 'font';
     try {
       var sf = await openSfnt(bytes); format = sf.format;
       var nm = parseName(sf.getTable('name'));
@@ -242,7 +237,40 @@
     sMeta.appendChild(el('b', { text: family }));
     [style, glyphs != null ? glyphs + ' glyphs' : null, format].forEach(function (t) { if (t) sMeta.appendChild(el('span', { text: t })); });
     fillBlocks();
-  })();
+  }
 
-  if (c.resize) c.resize(660, 480);
+  // From a CDMI object URL (opened from a container, or chosen in the Open dialog).
+  async function loadFromURL(url) {
+    var bytes;
+    try {
+      var res = await fetch(url.replace(/[?#].*$/, '') + '?value', { headers: Object.assign({ Accept: 'application/cdmi-object' }, c.headers || {}) });
+      if (!res.ok) throw new Error(res.status + '');
+      var rep = await res.json(), val = rep.value || '';
+      if (rep.valuetransferencoding === 'base64') { var bin = atob(val.replace(/\s+/g, '')); bytes = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); }
+      else bytes = new TextEncoder().encode(val);
+    } catch (e) { sMeta.textContent = 'Could not read the font: ' + (e && e.message || e); return; }
+    showFont(bytes, nameFromURL(url));
+  }
+
+  function fixSize() { if (c.fixedHeight) c.fixedHeight(660, 480); else if (c.resize) c.resize(660, 480); }   // fixed height; width stays resizable
+
+  // Opened on its own (no font passed): the window is created hidden, so nothing shows but the desktop's standard Open
+  // dialog, raised at once and filtered to font objects. A chosen font reveals the window and loads; Cancel/Esc chooses
+  // nothing, so the viewer -- opened only to show a font -- closes itself without ever appearing.
+  function openDialog() {
+    if (!c.desktop || !c.desktop.pickObject) { if (c.visible) c.visible(true); sMeta.textContent = 'No font to show. Open one from a container.'; return; }
+    c.desktop.pickObject({ title: 'Open a font file', startURI: c.homeURI ? c.homeURI + 'fonts/' : (c.baseURI || null),
+      filter: function (name) { return /\.(ttf|otf|woff2?|ttc)$/i.test(name); } })
+      .then(function (url) { if (url) { if (c.visible) c.visible(true); loadFromURL(url); } else if (c.close) c.close(); });
+  }
+
+  setSampleSize();
+  if (c.startURI) {
+    fixSize();
+    loadFromURL(c.startURI);
+  } else {
+    if (c.visible) c.visible(false);   // keep the just-created (hidden) window hidden until a font is picked -- before fixSize, whose signal would otherwise reveal it
+    fixSize();
+    openDialog();
+  }
 })();
