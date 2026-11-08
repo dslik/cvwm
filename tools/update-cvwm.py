@@ -27,9 +27,9 @@ mimetypes.add_type("image/svg+xml", ".svg")   # so an index.svg icon is stored w
 # under apps/utils/; the rest sit directly under apps/.
 CDMI_APPS = ["capabilities", "domains", "namespaces", "postcdmi", "queues", "relationships", "servers", "notifications", "query"]
 UTILS_APPS = ["console", "xterm", "capture", "framer"]
-APPS = ["earthworm", "textile", "xclock", "mcpinspector", "mdviewer", "pdfviewer", "fontviewer"] + UTILS_APPS + CDMI_APPS
+APPS = ["earthworm", "textile", "xclock", "mcpinspector", "mdviewer", "fontviewer"] + UTILS_APPS + CDMI_APPS
 BIN = ["ls", "pwd", "cat", "head", "hexdump", "stat", "caps", "tree", "df", "echo", "open", "which", "nc", "ssh", "zip", "unzip"]
-CONTROL_PANELS = ["locale"]
+CONTROL_PANELS = ["locale", "apps"]
 TESTS = ["vtest", "cryptotest"]
 SCRIPT_VERSION = "1.1.0"   # update-cvwm.py (semver)
 HERE = os.path.dirname(os.path.abspath(__file__))

@@ -17,9 +17,9 @@ mimetypes.add_type("image/svg+xml", ".svg")   # so an index.svg icon is stored w
 # under apps/utils/; the rest sit directly under apps/.
 CDMI_APPS = ["capabilities", "domains", "namespaces", "postcdmi", "queues", "relationships", "servers", "notifications", "query"]
 UTILS_APPS = ["console", "xterm", "capture", "framer"]
-APPS = ["earthworm", "textile", "xclock", "mcpinspector", "mdviewer", "pdfviewer", "fontviewer"] + UTILS_APPS + CDMI_APPS
+APPS = ["earthworm", "textile", "xclock", "mcpinspector", "mdviewer", "fontviewer"] + UTILS_APPS + CDMI_APPS
 BIN = ["ls", "pwd", "cat", "head", "hexdump", "stat", "caps", "tree", "df", "echo", "open", "which", "nc", "ssh", "zip", "unzip"]
-CONTROL_PANELS = ["locale"]   # control panels, installed into /control_panels/ and imported into each home like apps
+CONTROL_PANELS = ["locale", "apps"]   # control panels, installed into /control_panels/ and imported into each home like apps
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Test commands are optional and not part of a release package: whatever directories exist under dev/tests/ (none in a
 # release) are offered to --tests, so the installer runs cleanly whether or not they are present.

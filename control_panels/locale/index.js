@@ -2,13 +2,13 @@
  * control_panels/locale/index.js — the Locale control panel.
  *
  * Sets the user's preferred language and the number, date and time formats, and saves them as JSON to
- * ~/proc/control_panels/locale (the control-panel configuration convention). There is no menu bar, status bar or
+ * ~/prefs/locale.json (user preferences live under ~/prefs/). There is no menu bar, status bar or
  * buttons: a change takes effect at once. Settings are on the left, a live preview on the right.
  *
  * Taking effect means two things, and the desktop does the rest (see cvwm.js, "locale"):
  *   - the live signal: the shared same-origin localStorage key "cvwm.locale" is written on every change, so the
  *     desktop and every open app re-render in the new formats at once (the same mechanism as the dark-mode toggle);
- *   - persistence: the JSON is also written to ~/proc/control_panels/locale, restored on next sign-in.
+ *   - persistence: the JSON is also written to ~/prefs/locale.json, restored on next sign-in.
  *
  * EVERY visible string comes from this app's resource fork (CTX.rsrc): the UI strings per language under
  * rsrc/strings/<lang>.json, and the shared language list under rsrc/data/langs.json. Nothing is hard-coded here --
@@ -142,9 +142,9 @@
   async function persist() {
     var S = strings(cfg.language);
     if (!c.homeURI) { noteCell.textContent = S.note_session; return; }
-    var baseU = c.homeURI + 'proc/', dir = baseU + 'control_panels/', url = dir + 'locale';
+    var dir = c.homeURI + 'prefs/', url = dir + 'locale.json';
     try {
-      await ensureDir(baseU); await ensureDir(dir);
+      await ensureDir(dir);
       var res = await fetch(url, { method: 'PUT', headers: headers({ 'Content-Type': 'application/cdmi-object', Accept: 'application/cdmi-object' }),
         body: JSON.stringify({ mimetype: 'application/json', metadata: {}, valuetransferencoding: 'utf-8', value: JSON.stringify(Object.assign({}, cfg, { updated: new Date().toISOString() }), null, 2) }) });
       noteCell.textContent = res.ok ? '' : S.note_fail.replace('{s}', res.status);
@@ -155,7 +155,7 @@
   (async function () {
     if (c.homeURI) {
       try {
-        var got = await fetch(c.homeURI + 'proc/control_panels/locale?value', { headers: headers({ Accept: 'application/cdmi-object' }) });
+        var got = await fetch(c.homeURI + 'prefs/locale.json?value', { headers: headers({ Accept: 'application/cdmi-object' }) });
         if (got.ok) { var rep = await got.json(); var raw = rep.value; if (rep.valuetransferencoding === 'base64') { try { raw = decodeURIComponent(escape(atob(raw))); } catch (e) { raw = atob(raw); } }
           cfg = norm(JSON.parse(raw)); }
       } catch (e) {}

@@ -1,6 +1,6 @@
 /*!
  * cvwm - the CDMI Virtual Window Manager: an X11 / FVWM style desktop for CDMI 3 servers, in one plain JavaScript file.
- * cvwm version: 2.106.0
+ * cvwm version: 2.110.0
  *
  *   <!doctype html><meta charset="utf-8"><title>cvwm</title><script src="cvwm.js"></script>
  *
@@ -48,8 +48,10 @@
     appsDir: 'apps/',
     panelsDir: 'control_panels/',   // control panels: imported into the home like apps (see provisionHomePanels)
     fontsDir: 'fonts/',             // fonts: a server-wide /fonts/ imported into the home like apps (see provisionHomeFonts)
-    procDir: 'proc/',               // where a control panel keeps its JSON config (~/proc/control_panels/<name>)
+    procDir: 'proc/',               // runtime state in the home (e.g. ~/proc/screens/)
+    prefsDir: 'prefs/',             // user preferences as JSON (~/prefs/locale.json, ~/prefs/apps.json)
     screensDir: 'screens/',         // one container per live browser window, numbered 1,2,... (~/proc/screens/<n>)
+    builtinApps: ['apps/mdviewer/', 'apps/fontviewer/', 'apps/textile/', 'apps/earthworm/'],   // seeded into ~/prefs/apps.json on first run
     binDir: 'bin/',
     pageSize: 200,
     maxChildren: 5000,
@@ -73,7 +75,7 @@
   /* A value is returned only where a read selects it, so reading an object's value names these fields. */
   var VALUE_FIELDS = '?objectType&objectName&objectID&mimetype&metadata&valuetransferencoding&valuerange&value';
   var MOUNTS_KEY = 'cvwm.mounts', VIEW_KEY = 'cvwm.view';
-  var VERSION = '2.106.0';                 // the running build; a change purges cvwm's saved state (see below)
+  var VERSION = '2.110.0';                 // the running build; a change purges cvwm's saved state (see below)
   var VERSION_KEY = 'cvwm.version';
 
   /* Saved state is namespaced under "cvwm." in localStorage: mounts, the icon/list view choice, known hosts and
@@ -3484,8 +3486,8 @@
   }
   /* The home's control panels, provisioned exactly like its apps: ~/control_panels/ layers the user's own panels
      (the writable "self" layer, so a panel dropped in ~/control_panels/ overrides an imported one) over a read-only
-     CDMI import of the server's /control_panels/. And ~/proc/control_panels/ is a plain container where each panel
-     keeps its JSON configuration (e.g. ~/proc/control_panels/locale). Both are best-effort and done once. */
+     CDMI import of the server's /control_panels/. A panel keeps its preferences as JSON under ~/prefs/ (locale.json,
+     apps.json). Best-effort and done once. */
   async function provisionHomePanels(homeBase) {
     var panelsURL = homeBase + CFG.panelsDir;
     var probe;
@@ -3498,8 +3500,8 @@
       var im = await send('PUT', panelsURL, T_CONTAINER, JSON.stringify({ metadata: {}, imports: imports }));
       if (!im.ok) console.warn('[cdmi] home control panels: setting imports returned ' + im.status);
     }
-    await ensureContainer(homeBase + CFG.procDir);                       // ~/proc/
-    await ensureContainer(homeBase + CFG.procDir + 'control_panels/');   // ~/proc/control_panels/
+    await ensureContainer(homeBase + CFG.procDir);                       // ~/proc/ (runtime state, e.g. screens/)
+    await ensureContainer(homeBase + CFG.prefsDir);                      // ~/prefs/ (locale.json, apps.json)
   }
   /* The home's fonts, provisioned like its apps and control panels: ~/fonts/ layers the user's own fonts (writable
      self) over a read-only CDMI import of the server's /fonts/. Double-clicking a font object opens fontviewer. */
@@ -3681,7 +3683,7 @@
 
   /* A convenience: where a disk holds one of these applications under /apps/, menus offer it, the capability
      viewer replaces the plain capabilities window, and PDF objects open in the slide presenter. */
-  var helpers = { xterm: null, earthworm: null, capabilities: null, console: null, textile: null, xclock: null, capture: null, mdviewer: null, pdfviewer: null, fontviewer: null, namespaces: null, postcdmi: null, domains: null, relationships: null, servers: null, queues: null, notifications: null, query: null };
+  var helpers = { xterm: null, earthworm: null, capabilities: null, console: null, textile: null, xclock: null, capture: null, mdviewer: null, fontviewer: null, namespaces: null, postcdmi: null, domains: null, relationships: null, servers: null, queues: null, notifications: null, query: null };
   /* Applications are grouped into sub-folders of /apps/: the CDMI applications under /apps/cdmi/, the general
      utilities under /apps/utils/. appPath places a known name in its group; names in neither sit directly at /apps/. */
   var CDMI_APPS = { capabilities: 1, domains: 1, namespaces: 1, postcdmi: 1, queues: 1, relationships: 1, servers: 1, notifications: 1, query: 1 };
@@ -3721,6 +3723,7 @@
       .filter(function (m) { return !foundHome.some(function (f) { return f.base === m.base; }); }));
     try { await mountHome(found); } catch (e) { console.warn('[cdmi] home: ' + (e && e.message || e)); }
     drawDisks(); vouchCrossOrigin(); locateHelpers(); loadLocaleFromHome();
+    (function () { var home = homeDisk(); if (home) loadAppRegistry(home.base).then(function () { browsers.forEach(function (b) { if (!b.win.closed) b.show(b.url); }); }).catch(function () {}); })();
     if (!disks.length) {
       if (found === null) connectDialog(problem ? 'Discovery failed: ' + problem + '. Enter a base URI to mount it as a disk.'
         : 'No discovery tree at this origin: GET ' + WELL_KNOWN + 'cdmi_namespaces/ returned 404. Enter a base URI to mount it as a disk.');
@@ -4001,14 +4004,14 @@
 
   async function openObject(url, name, into, rethrow, plain, titled) {
     try {
-      if (helpers.pdfviewer && /\.pdf$/i.test(stripQuery(url))) return launchApp(helpers.pdfviewer, { start: url });   // pdfviewer reads it itself with the browser's PDF renderer
+      // The app registry decides the opener. An extension alone can decide before the object is read (so an app that
+      // renders the bytes itself need not have them read twice); otherwise the object is read and matched by its media type.
+      if (!plain) { var pre = appForType(stripQuery(url), null); if (pre) return launchApp(pre, { start: url }); }
       var got = await getLeaf(url), rep = got.rep, d = diskFor(got.url), title = titled || (d ? d.name + ':' + pathIn(d, got.url) : (name || got.url));
       if (rep.objectType === T_CONTAINER || rep.objectType === T_CAPABILITY || rep.objectType === T_DOMAIN) return openContainer(/\/$/.test(got.url) ? got.url : got.url + '/', { into: into });
-      if (helpers.pdfviewer && !plain && rep.objectType !== T_QUEUE && (/\.pdf$/i.test(stripQuery(got.url)) || rep.mimetype === 'application/pdf')) return launchApp(helpers.pdfviewer, { start: got.url });
-      if (helpers.fontviewer && !plain && rep.objectType !== T_QUEUE && (/\.(ttf|otf|woff2?|ttc)$/i.test(stripQuery(got.url)) || /font|sfnt/.test(rep.mimetype || ''))) return launchApp(helpers.fontviewer, { start: got.url });
-      if (helpers.mdviewer && !plain && rep.objectType !== T_QUEUE && (/\.(md|markdown|mdown|mkd)$/i.test(stripQuery(got.url)) || rep.mimetype === 'text/markdown')) return launchApp(helpers.mdviewer, { start: got.url });
-      if (helpers.textile && !plain && rep.objectType !== T_QUEUE && isTextObject(rep, got.url)) return launchApp(helpers.textile, { start: got.url });
       if (rep.objectType === T_QUEUE) return helpers.queues ? launchApp(helpers.queues, { start: got.url }) : textWindow(title, JSON.stringify(rep, null, 2), { icon: 'queue', status: describe(rep) });
+      if (!plain) { var app = appForType(stripQuery(got.url), rep.mimetype); if (app) return launchApp(app, { start: got.url }); }
+      if (helpers.textile && !plain && isTextObject(rep, got.url)) return launchApp(helpers.textile, { start: got.url });   // any remaining text object opens in the editor
       if (!got.raw) { var full = await readObject(got.url); rep = Object.assign({}, rep, full.rep); got = full; }      // the first read described it; this one selects the value
       var val = await readValue(got);
       if (/^image\//.test(val.mime) && val.bytes) {
@@ -4165,7 +4168,7 @@
   /* ------------------------------------------------------------------ locale
 
      The user's locale -- language (a BCP-47 tag, which is also the Intl locale) and number / date / time formats --
-     is set in the Locale control panel and saved per user at ~/proc/control_panels/locale. The live, cross-window
+     is set in the Locale control panel and saved per user at ~/prefs/locale.json. The live, cross-window
      signal is the same-origin localStorage key "cvwm.locale" (exactly as "cvwm.dark" is for the theme): the panel
      writes it, every window (desktop and app iframes) reads it and re-renders. An absent setting is the desktop's
      historical default -- ISO dates, 24-hour time, grouped numbers -- so nothing changes until a locale is chosen. */
@@ -4182,12 +4185,91 @@
   async function loadLocaleFromHome() {
     var home = homeDisk(); if (!home) return;
     try {
-      var got = await getRep(home.base + CFG.procDir + 'control_panels/locale?value', T_OBJECT, { quiet: true });
+      var got = await getRep(home.base + CFG.prefsDir + 'locale.json?value', T_OBJECT, { quiet: true });
       var raw = got.rep.value; if (got.rep.valuetransferencoding === 'base64') { try { raw = decodeURIComponent(escape(atob(raw))); } catch (e) { raw = atob(raw); } }
       var cfg = normLocale(JSON.parse(raw)); LOCALE = cfg;
       try { localStorage.setItem(LOCALE_KEY, JSON.stringify(cfg)); } catch (e) { /* no storage */ }
       relocalize();
     } catch (e) { /* none saved */ }
+  }
+
+  /* ---------------------------------------------------------------- the app registry (~/prefs/apps.json)
+
+     Which application opens an object, and which icon the object shows, come from a registry: the apps the user has
+     added, and the file types (media types and extensions) each one claims. An app declares what it handles in its own
+     resource fork, rsrc/filetypes.json -- a list of { mimetypes, extensions, icon } -- and the Apps control panel both
+     reads those declarations and edits the registry. The registry itself (~/prefs/apps.json) is a list of app paths;
+     on first sign-in it is seeded from the built-in apps. A type claimed by more than one app resolves to the first in
+     the list (links may override). The icon an object shows is the claiming app's declared icon for that type: a name
+     of a built-in cvwm icon, a resource path within the app, or -- absent -- the app's own index.svg/png. */
+  var APPREG = { ready: false, byExt: {}, byMime: {}, wild: [], apps: [] };
+  function b64text(s) { try { return decodeURIComponent(escape(atob(String(s).replace(/\s+/g, '')))); } catch (e) { try { return atob(s); } catch (_) { return ''; } } }
+  function appURIof(homeBase, rel) { return /^https?:/i.test(rel) ? rel : homeBase + String(rel).replace(/^\//, ''); }
+  function iconSpecFor(appURI, icon) { if (!icon) return { app: appURI }; if (ICONS[icon]) return { builtin: icon }; return { app: appURI, path: String(icon) }; }
+  async function readFiletypes(appURI) {
+    try {
+      // The resource fork drops a file's extension on install (filetypes.json is served as the object "filetypes").
+      var got = await getRep(appURI + 'rsrc/filetypes?value', T_OBJECT, { quiet: true });
+      var raw = got.rep.value; if (got.rep.valuetransferencoding === 'base64') raw = b64text(raw);
+      var m = JSON.parse(raw); return Array.isArray(m.types) ? m.types : [];
+    } catch (e) { return null; }     // null: not an app that declares types (or unreadable)
+  }
+  function claimType(reg, appURI, t) {
+    var spec = iconSpecFor(appURI, t.icon);
+    (t.extensions || []).forEach(function (e) { e = String(e).toLowerCase(); if (!reg.byExt[e]) reg.byExt[e] = { app: appURI, icon: spec }; });
+    (t.mimetypes || []).forEach(function (m) { m = String(m).toLowerCase();
+      if (/\*$/.test(m)) reg.wild.push({ prefix: m.replace(/\*$/, ''), app: appURI, icon: spec });
+      else if (!reg.byMime[m]) reg.byMime[m] = { app: appURI, icon: spec }; });
+  }
+  async function loadAppRegistry(homeBase) {
+    var reg = { ready: false, byExt: {}, byMime: {}, wild: [], apps: [] };
+    var cfg = null;
+    try {
+      var got = await getRep(homeBase + CFG.prefsDir + 'apps.json?value', T_OBJECT, { quiet: true });
+      var raw = got.rep.value; if (got.rep.valuetransferencoding === 'base64') raw = b64text(raw);
+      cfg = JSON.parse(raw);
+    } catch (e) { cfg = null; }
+    if (!cfg || !Array.isArray(cfg.apps)) {                              // first sign-in: seed from the built-in apps
+      cfg = { version: 1, apps: CFG.builtinApps.slice(), links: {} };
+      try { await send('PUT', homeBase + CFG.prefsDir + 'apps.json', T_OBJECT, JSON.stringify({ mimetype: 'application/json', metadata: {}, valuetransferencoding: 'utf-8', value: JSON.stringify(cfg, null, 2) })); } catch (e) { /* best effort */ }
+    }
+    for (var i = 0; i < cfg.apps.length; i++) {
+      var rel = cfg.apps[i], appURI = appURIof(homeBase, rel);
+      var types = await readFiletypes(appURI);
+      reg.apps.push({ uri: appURI, rel: rel, name: String(rel).replace(/\/$/, '').split('/').pop(), types: types || [] });
+      (types || []).forEach(function (t) { claimType(reg, appURI, t); });
+    }
+    var links = cfg.links || {};                                        // key (".ext" or a media type, optionally "type/*") -> app path
+    Object.keys(links).forEach(function (k) {
+      var appURI = appURIof(homeBase, links[k]), kl = k.toLowerCase(), spec = { app: appURI };
+      var app = reg.apps.filter(function (a) { return a.uri === appURI; })[0];
+      if (app) app.types.forEach(function (t) {
+        var hit = (/^\./.test(k) && (t.extensions || []).map(function (x) { return String(x).toLowerCase(); }).indexOf(kl.slice(1)) >= 0)
+          || (!/^\./.test(k) && (t.mimetypes || []).map(function (x) { return String(x).toLowerCase(); }).indexOf(kl) >= 0);
+        if (hit) spec = iconSpecFor(appURI, t.icon);
+      });
+      if (/^\./.test(k)) reg.byExt[kl.slice(1)] = { app: appURI, icon: spec };
+      else if (/\*$/.test(k)) reg.wild.unshift({ prefix: kl.replace(/\*$/, ''), app: appURI, icon: spec });
+      else reg.byMime[kl] = { app: appURI, icon: spec };
+    });
+    reg.ready = true; APPREG = reg;
+  }
+  function regMatch(path, mimetype) {
+    if (!APPREG.ready) return null;
+    var ext = (String(path).match(/\.([a-z0-9]+)$/i) || [, ''])[1].toLowerCase(), m = (mimetype || '').toLowerCase();
+    if (ext && APPREG.byExt[ext]) return APPREG.byExt[ext];
+    if (m && APPREG.byMime[m]) return APPREG.byMime[m];
+    if (m) for (var i = 0; i < APPREG.wild.length; i++) if (APPREG.wild[i].prefix && m.indexOf(APPREG.wild[i].prefix) === 0) return APPREG.wild[i];
+    return null;
+  }
+  // The app that opens an object of this path/mimetype, or null. Before the registry has loaded, the former built-in
+  // mapping stands in, so opening works from the first moment of a session.
+  function appForType(path, mimetype) {
+    if (APPREG.ready) { var h = regMatch(path, mimetype); return h ? h.app : null; }
+    var ext = (String(path).match(/\.([a-z0-9]+)$/i) || [, ''])[1].toLowerCase(), m = (mimetype || '').toLowerCase();
+    if (helpers.fontviewer && (/^(ttf|otf|woff2?|ttc)$/.test(ext) || /font|sfnt/.test(m))) return helpers.fontviewer;
+    if (helpers.mdviewer && (/^(md|markdown|mdown|mkd)$/.test(ext) || m === 'text/markdown')) return helpers.mdviewer;
+    return null;
   }
 
   function localeGroupSep() { var n = LOCALE.numbers; return n === 'comma' ? '.' : n === 'space' ? '\u202f' : n === 'apos' ? '\u2019' : n === 'point' ? ',' : ''; }
@@ -4502,9 +4584,20 @@
       var bare = c.name.replace(/[\/?]$/, ''), url = childURL(parentURL, c.name);
       var atRootHere = self.disk && parentURL === self.disk.base;
       var sys = c.kind === 'container' && /^cdmi_/.test(bare) && (atRootHere || bare === 'cdmi_snapshots');
+      // The icon of a data object comes from the app registry where a registered app claims its type: a built-in icon
+      // name is drawn at once; an app's own icon or a resource icon is loaded below. A type no app claims, and every
+      // non-object, falls back to the built-in icon by extension.
+      var regHit = c.kind === 'object' ? regMatch(bare, c.mime) : null;
       var ic = c.kind === 'container' ? (sys ? 'system' : 'container') : c.kind === 'reference' ? 'reference' : c.kind === 'queue' ? 'queue'
+        : (regHit && regHit.icon.builtin) ? regHit.icon.builtin
         : /\.pdf$/i.test(bare) ? 'pdf' : /\.(ttf|otf|woff2?|ttc)$/i.test(bare) ? 'font' : /\.(m?js|json|sh|py|css|html?)$/i.test(bare) ? 'script' : /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(bare) ? 'image' : 'object';
       var pic = h('i', { html: icon(ic, px), style: 'display:flex' }), picWrap = h('span', { class: 'fv-pic' }, [pic]), kindCell = asList ? h('span', { class: 'dim', text: typeLabel(c) }) : null;
+      if (regHit && !regHit.icon.builtin) {        // the claiming app's own icon, or a resource icon it names
+        var loader;
+        if (regHit.icon.path) { var full = regHit.icon.app + regHit.icon.path, s = full.lastIndexOf('/'); loader = iconBlob(full.slice(0, s + 1), [full.slice(s + 1)], 0); }
+        else loader = loadIcon(regHit.icon.app);
+        loader.then(function (src) { if (src && pic.isConnected) { pic.textContent = ''; pic.appendChild(iconImg(src, px)); } }, function () {});
+      }
       var nameEl = h('span', { class: 'fv-name', text: c.name });
       var modCell = asList ? h('span', { class: 'dim', text: whenLabel(c.modified), title: c.modified || '' }) : null;
       var sizeCell = asList ? h('span', { class: 'dim num', text: sizeLabel(c.size), title: c.size === null ? '' : c.size + ' bytes' }) : null;
@@ -4559,7 +4652,6 @@
         popupMenu(ev.clientX, ev.clientY, c.name, [
           { label: isApp ? 'Run' : 'Open', action: function () { open(false); } },
           { label: 'Open in mdviewer', disabled: !helpers.mdviewer || c.kind !== 'object' || !(/\.(md|markdown|mdown|mkd)$/i.test(stripQuery(url))), action: function () { launchApp(helpers.mdviewer, { start: url }); } },
-          { label: 'Open in pdfviewer', disabled: !helpers.pdfviewer || c.kind !== 'object' || !(/\.pdf$/i.test(stripQuery(url))), action: function () { launchApp(helpers.pdfviewer, { start: url }); } },
           { label: 'Open in Textile', disabled: !helpers.textile || c.kind !== 'object', action: function () { launchApp(helpers.textile, { start: url }); } },
           { label: 'View', disabled: c.kind === 'container', action: function () { openObject(url, c.name, self, false, true); } },
           { label: 'Download…', disabled: c.kind !== 'object', action: function () { downloadObject(url, c.name); } },
@@ -4868,6 +4960,7 @@
       return { origin: origin, namespaces: out };
     },
     pickObject: function (opts) { return pickObject(opts || {}); },      // a common Open dialog (FVWM styled)
+    iconSvg: function (name, size) { return ICONS[name] ? svg(ICONS[name], size || 20) : null; },   // a built-in icon's SVG markup, for the Apps panel
     dropPane: function (id, handlers) { showDropPane(id, handlers || {}); },   // show a native "open a file" drop pane for an app
     showApp: function (id) { showApp(id); },                                  // swap from the drop pane to the app's iframe
     /* For the console application. */

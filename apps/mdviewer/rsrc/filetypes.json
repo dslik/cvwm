@@ -1,0 +1,3 @@
+{ "types": [
+  { "mimetypes": ["text/markdown"], "extensions": ["md", "markdown", "mdown", "mkd"], "icon": "object" }
+] }

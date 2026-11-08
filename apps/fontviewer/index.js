@@ -1,8 +1,8 @@
 /*!
  * apps/fontviewer/index.js — view a font file.
  *
- * Opened with a font object as its start (a .ttf/.otf/.woff/.woff2, routed here by the desktop on a double-click, as
- * PDFs go to pdfviewer), or on its own -- then its window stays hidden and only the desktop's standard Open dialog
+ * Opened with a font object as its start (a .ttf/.otf/.woff/.woff2, routed here by the desktop on a double-click via
+ * the app registry), or on its own -- then its window stays hidden and only the desktop's standard Open dialog
  * shows, filtered to font files; choosing one reveals the window and loads it, and Cancel closes the viewer (which
  * was opened only to show a font) without it ever appearing.
  * It loads the bytes with the FontFace API and shows, in one scrolling split view:

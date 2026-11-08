@@ -1,0 +1,5 @@
+{ "types": [
+  { "mimetypes": ["application/json", "application/xml", "application/javascript"], "extensions": ["js", "mjs", "json", "xml", "css", "sh", "py"], "icon": "script" },
+  { "mimetypes": ["text/markdown"], "extensions": ["md", "markdown", "mdown", "mkd"], "icon": "object" },
+  { "mimetypes": ["text/plain", "text/*"], "extensions": ["txt", "text", "log", "csv", "tsv", "ini", "conf", "cfg", "yaml", "yml"], "icon": "object" }
+] }
