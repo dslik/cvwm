@@ -1,6 +1,6 @@
 /*!
  * cvwm - the CDMI Virtual Window Manager: an X11 / FVWM style desktop for CDMI 3 servers, in one plain JavaScript file.
- * cvwm version: 2.102.0
+ * cvwm version: 2.103.0
  *
  *   <!doctype html><meta charset="utf-8"><title>cvwm</title><script src="cvwm.js"></script>
  *
@@ -47,6 +47,7 @@
     appIcons: ['index.svg', 'index.png'],   // an application/control-panel icon, SVG preferred over PNG
     appsDir: 'apps/',
     panelsDir: 'control_panels/',   // control panels: imported into the home like apps (see provisionHomePanels)
+    fontsDir: 'fonts/',             // fonts: a server-wide /fonts/ imported into the home like apps (see provisionHomeFonts)
     procDir: 'proc/',               // where a control panel keeps its JSON config (~/proc/control_panels/<name>)
     binDir: 'bin/',
     pageSize: 200,
@@ -71,7 +72,7 @@
   /* A value is returned only where a read selects it, so reading an object's value names these fields. */
   var VALUE_FIELDS = '?objectType&objectName&objectID&mimetype&metadata&valuetransferencoding&valuerange&value';
   var MOUNTS_KEY = 'cvwm.mounts', VIEW_KEY = 'cvwm.view';
-  var VERSION = '2.102.0';                 // the running build; a change purges cvwm's saved state (see below)
+  var VERSION = '2.103.0';                 // the running build; a change purges cvwm's saved state (see below)
   var VERSION_KEY = 'cvwm.version';
 
   /* Saved state is namespaced under "cvwm." in localStorage: mounts, the icon/list view choice, known hosts and
@@ -3422,6 +3423,7 @@
     CD_home = { base: base, path: path };
     try { await provisionHomeApps(homeBase, base); } catch (e) { console.warn('[cdmi] home apps: ' + (e && e.message || e)); }
     try { await provisionHomePanels(homeBase, base); } catch (e) { console.warn('[cdmi] home control panels: ' + (e && e.message || e)); }
+    try { await provisionHomeFonts(homeBase, base); } catch (e) { console.warn('[cdmi] home fonts: ' + (e && e.message || e)); }
   }
 
   /* A freshly created home has no applications of its own. Give it an "apps" container that layers the server's
@@ -3467,6 +3469,18 @@
     }
     await ensureContainer(homeBase + CFG.procDir);                       // ~/proc/
     await ensureContainer(homeBase + CFG.procDir + 'control_panels/');   // ~/proc/control_panels/
+  }
+  /* The home's fonts, provisioned like its apps and control panels: ~/fonts/ layers the user's own fonts (writable
+     self) over a read-only CDMI import of the server's /fonts/. Double-clicking a font object opens fontviewer. */
+  async function provisionHomeFonts(homeBase) {
+    var fontsURL = homeBase + CFG.fontsDir, probe;
+    try { probe = await req(fontsURL + '?objectType', T_CONTAINER, { quiet: true, probe: true }); } catch (e) { return; }
+    if (probe.status !== 404) return;
+    var im = await send('PUT', fontsURL, T_CONTAINER, JSON.stringify({ metadata: {}, imports: [
+      { type: 'self', write_enabled: 'true' },
+      { type: 'CDMI', import_uri: '/' + CFG.fontsDir, write_enabled: 'false' }
+    ] }));
+    if (!im.ok) console.warn('[cdmi] home fonts: setting imports returned ' + im.status);
   }
   // Create a plain container if it is missing; leave it alone otherwise. Best-effort (a 401/403 is not ours to make).
   async function ensureContainer(url) {
@@ -3531,7 +3545,7 @@
 
   /* A convenience: where a disk holds one of these applications under /apps/, menus offer it, the capability
      viewer replaces the plain capabilities window, and PDF objects open in the slide presenter. */
-  var helpers = { xterm: null, earthworm: null, capabilities: null, console: null, textile: null, xclock: null, capture: null, mdviewer: null, pdfviewer: null, namespaces: null, postcdmi: null, domains: null, relationships: null, servers: null, queues: null, notifications: null, query: null };
+  var helpers = { xterm: null, earthworm: null, capabilities: null, console: null, textile: null, xclock: null, capture: null, mdviewer: null, pdfviewer: null, fontviewer: null, namespaces: null, postcdmi: null, domains: null, relationships: null, servers: null, queues: null, notifications: null, query: null };
   /* Applications are grouped into sub-folders of /apps/: the CDMI applications under /apps/cdmi/, the general
      utilities under /apps/utils/. appPath places a known name in its group; names in neither sit directly at /apps/. */
   var CDMI_APPS = { capabilities: 1, domains: 1, namespaces: 1, postcdmi: 1, queues: 1, relationships: 1, servers: 1, notifications: 1, query: 1 };
@@ -3852,6 +3866,7 @@
       var got = await getLeaf(url), rep = got.rep, d = diskFor(got.url), title = titled || (d ? d.name + ':' + pathIn(d, got.url) : (name || got.url));
       if (rep.objectType === T_CONTAINER || rep.objectType === T_CAPABILITY || rep.objectType === T_DOMAIN) return openContainer(/\/$/.test(got.url) ? got.url : got.url + '/', { into: into });
       if (helpers.pdfviewer && !plain && rep.objectType !== T_QUEUE && (/\.pdf$/i.test(stripQuery(got.url)) || rep.mimetype === 'application/pdf')) return launchApp(helpers.pdfviewer, { start: got.url });
+      if (helpers.fontviewer && !plain && rep.objectType !== T_QUEUE && (/\.(ttf|otf|woff2?|ttc)$/i.test(stripQuery(got.url)) || /font|sfnt/.test(rep.mimetype || ''))) return launchApp(helpers.fontviewer, { start: got.url });
       if (helpers.mdviewer && !plain && rep.objectType !== T_QUEUE && (/\.(md|markdown|mdown|mkd)$/i.test(stripQuery(got.url)) || rep.mimetype === 'text/markdown')) return launchApp(helpers.mdviewer, { start: got.url });
       if (helpers.textile && !plain && rep.objectType !== T_QUEUE && isTextObject(rep, got.url)) return launchApp(helpers.textile, { start: got.url });
       if (rep.objectType === T_QUEUE) return helpers.queues ? launchApp(helpers.queues, { start: got.url }) : textWindow(title, JSON.stringify(rep, null, 2), { icon: 'queue', status: describe(rep) });

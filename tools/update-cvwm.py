@@ -27,7 +27,7 @@ mimetypes.add_type("image/svg+xml", ".svg")   # so an index.svg icon is stored w
 # under apps/utils/; the rest sit directly under apps/.
 CDMI_APPS = ["capabilities", "domains", "namespaces", "postcdmi", "queues", "relationships", "servers", "notifications", "query"]
 UTILS_APPS = ["console", "xterm", "capture", "framer"]
-APPS = ["earthworm", "textile", "xclock", "mcpinspector", "mdviewer", "pdfviewer"] + UTILS_APPS + CDMI_APPS
+APPS = ["earthworm", "textile", "xclock", "mcpinspector", "mdviewer", "pdfviewer", "fontviewer"] + UTILS_APPS + CDMI_APPS
 BIN = ["ls", "pwd", "cat", "head", "hexdump", "stat", "caps", "tree", "df", "echo", "open", "which", "nc", "ssh", "zip", "unzip"]
 CONTROL_PANELS = ["locale"]
 TESTS = ["vtest", "cryptotest"]
@@ -292,6 +292,7 @@ def main():
         ensure_container(http, base + "control_panels/", created)
         for pnl in args.panels:
             jobs.append(("control_panels/" + pnl, os.path.join(PKG, "control_panels", pnl), None))
+    ensure_container(http, base + "fonts/", created)   # the fonts import target (empty; admin fills it)
     if args.tests:
         ensure_container(http, base + "dev/", created)
         for t in args.tests:

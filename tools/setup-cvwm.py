@@ -51,7 +51,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-SCRIPT_VERSION = "2.102.0"   # setup-cvwm.py (semver)
+SCRIPT_VERSION = "2.103.0"   # setup-cvwm.py (semver)
 HERE_TOOLS = os.path.dirname(os.path.abspath(__file__))   # this script's directory, holding kms-make-dac-keys.mjs
 
 

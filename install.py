@@ -17,7 +17,7 @@ mimetypes.add_type("image/svg+xml", ".svg")   # so an index.svg icon is stored w
 # under apps/utils/; the rest sit directly under apps/.
 CDMI_APPS = ["capabilities", "domains", "namespaces", "postcdmi", "queues", "relationships", "servers", "notifications", "query"]
 UTILS_APPS = ["console", "xterm", "capture", "framer"]
-APPS = ["earthworm", "textile", "xclock", "mcpinspector", "mdviewer", "pdfviewer"] + UTILS_APPS + CDMI_APPS
+APPS = ["earthworm", "textile", "xclock", "mcpinspector", "mdviewer", "pdfviewer", "fontviewer"] + UTILS_APPS + CDMI_APPS
 BIN = ["ls", "pwd", "cat", "head", "hexdump", "stat", "caps", "tree", "df", "echo", "open", "which", "nc", "ssh", "zip", "unzip"]
 CONTROL_PANELS = ["locale"]   # control panels, installed into /control_panels/ and imported into each home like apps
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -140,6 +140,9 @@ def main():
     if args.panels:
         put(base + "control_panels/", "application/cdmi-container", {"metadata": {}}, headers, context)
         jobs += [("control_panels/" + p, os.path.join(HERE, "control_panels", p), None) for p in args.panels]
+    # The /fonts/ container: empty here; an admin drops font files in, and each home imports it (fonts double-click
+    # open in fontviewer). Created so the home's import target exists.
+    put(base + "fonts/", "application/cdmi-container", {"metadata": {}}, headers, context)
     if args.tests:
         put(base + "dev/", "application/cdmi-container", {"metadata": {}}, headers, context); put(base + "dev/tests/", "application/cdmi-container", {"metadata": {}}, headers, context)
         jobs += [("dev/tests/" + t, os.path.join(HERE, "dev", "tests", t), None) for t in args.tests]
