@@ -1,6 +1,6 @@
 /*!
  * cvwm - the CDMI Virtual Window Manager: an X11 / FVWM style desktop for CDMI 3 servers, in one plain JavaScript file.
- * cvwm version: 2.105.0
+ * cvwm version: 2.106.0
  *
  *   <!doctype html><meta charset="utf-8"><title>cvwm</title><script src="cvwm.js"></script>
  *
@@ -49,6 +49,7 @@
     panelsDir: 'control_panels/',   // control panels: imported into the home like apps (see provisionHomePanels)
     fontsDir: 'fonts/',             // fonts: a server-wide /fonts/ imported into the home like apps (see provisionHomeFonts)
     procDir: 'proc/',               // where a control panel keeps its JSON config (~/proc/control_panels/<name>)
+    screensDir: 'screens/',         // one container per live browser window, numbered 1,2,... (~/proc/screens/<n>)
     binDir: 'bin/',
     pageSize: 200,
     maxChildren: 5000,
@@ -72,7 +73,7 @@
   /* A value is returned only where a read selects it, so reading an object's value names these fields. */
   var VALUE_FIELDS = '?objectType&objectName&objectID&mimetype&metadata&valuetransferencoding&valuerange&value';
   var MOUNTS_KEY = 'cvwm.mounts', VIEW_KEY = 'cvwm.view';
-  var VERSION = '2.105.0';                 // the running build; a change purges cvwm's saved state (see below)
+  var VERSION = '2.106.0';                 // the running build; a change purges cvwm's saved state (see below)
   var VERSION_KEY = 'cvwm.version';
 
   /* Saved state is namespaced under "cvwm." in localStorage: mounts, the icon/list view choice, known hosts and
@@ -111,6 +112,14 @@
   function stripQuery(u) { return String(u).replace(/[?#].*$/, ''); }
   function enc(name) { return encodeURIComponent(name); }
   function safeDecode(s) { try { return decodeURIComponent(s); } catch (e) { return s; } }
+  // The source URI of a move or copy, with its path percent-decoded. The server resolves a move/copy source by the
+  // literal path of the value it is given and does not percent-decode it, so a "%20" in a name is addressed as the
+  // three characters and no object is found. The names are given decoded; the authority and scheme are left as they are.
+  function sourceURI(url) {
+    var m = String(url).match(/^([a-zA-Z][\w+.-]*:\/\/[^\/?#]*)(\/[^?#]*)?([?#].*)?$/);
+    if (!m) return url;
+    return m[1] + (m[2] ? m[2].split('/').map(safeDecode).join('/') : '') + (m[3] || '');
+  }
 
   function CdmiError(status, message, url) {
     this.name = 'CdmiError'; this.status = status; this.message = message; this.url = url;
@@ -761,7 +770,7 @@
     '.fv-item.fv-into,.fv-disk.fv-into{outline:3px solid #1f5fd0;outline-offset:1px;background:rgba(31,95,208,.14)}',
     '.fv-item.fv-open,.fv-disk.fv-open{outline:3px solid #1f9d55;outline-offset:1px;background:rgba(31,157,85,.16)}',   /* dropping an object onto an app: open with it */
     '.fv-item.fv-lifted{opacity:.45}',
-    '.fv-client iframe{flex:1;width:100%;border:0;display:block;background:#000}',
+    '.fv-client iframe{flex:1;width:100%;border:0;display:block;background:transparent}',   /* the grey client shows through until the app paints -- no black flash */
     '.fv-rs{position:absolute;z-index:0}',
     '.fv-rs.n{left:24px;right:24px;top:-2px;height:9px;cursor:n-resize}.fv-rs.s{left:24px;right:24px;bottom:-2px;height:9px;cursor:s-resize}',
     '.fv-rs.w{top:24px;bottom:24px;left:-2px;width:9px;cursor:w-resize}.fv-rs.e{top:24px;bottom:24px;right:-2px;width:9px;cursor:e-resize}',
@@ -1163,7 +1172,7 @@
          copy, and one at another origin to a remote copy; both are accepted. A disk-relative path (pathIn) would
          carry the "~/" home shorthand, which is a display convention, not a namespace path the server accepts. */
       var body = {};
-      body[verb] = src.url;
+      body[verb] = sourceURI(src.url);
       var res = await send('PUT', dest, type, JSON.stringify(body));
       if (!res.ok) throw await toError(res);
       [src.parent, to, src.url].forEach(function (u) { delete appCache[u]; delete iconCache[u]; delete iconKnown[u]; });
@@ -1650,9 +1659,11 @@
     return m;
   }
 
-  function deskItems(fn) {
+  function deskItems(fn, withScreen) {
     var out = [];
-    for (var y = 0; y < CFG.desksY; y++) for (var x = 0; x < CFG.desksX; x++) (function (x, y) { out.push({ label: 'Desk ' + (y * CFG.desksX + x + 1), action: function () { fn(x, y); } }); })(x, y);
+    for (var y = 0; y < CFG.desksY; y++) for (var x = 0; x < CFG.desksX; x++) (function (x, y) {
+      out.push({ label: (withScreen ? 'Screen ' + (SCREEN.num || 1) + ': ' : '') + 'Desk ' + (y * CFG.desksX + x + 1), action: function () { fn(x, y); } });
+    })(x, y);
     return out;
   }
   function windowListItems() {
@@ -1663,7 +1674,7 @@
     popupMenu(x, y, 'Window Ops', [
       { label: 'Raise', action: function () { w.raise(); } }, { label: 'Lower', action: function () { w.lower(); } },
       { label: 'Iconify', action: function () { w.iconify(); } }, { label: w.maxed ? 'Restore size' : 'Maximize', action: function () { w.toggleMax(); } },
-      { label: 'Send to desk', submenu: function () { return deskItems(function (dx, dy) { w.sendToDesk(dx, dy); }); } },
+      { label: 'Send to desk', submenu: function () { return deskItems(function (dx, dy) { w.sendToDesk(dx, dy); }, true); } },
       '-'
     ].concat(w.extraMenu ? w.extraMenu().concat(['-']) : [], [{ label: 'Close', action: function () { w.close(); } }]));
   }
@@ -1680,7 +1691,7 @@
 
   function rootMenu(x, y) {
     popupMenu(x, y, 'cvwm', [
-      { label: 'Rescan namespaces', action: rescan }, { label: 'Connect to base URI\u2026', action: function () { connectDialog(); } },
+      { label: 'Rescan namespaces', action: rescan }, { label: 'Open CDMI URI\u2026', action: function () { connectDialog(); } },
       '-',
       { label: 'New xterm', disabled: !helpers.xterm, action: function () { launchXterm(null); } }, { label: 'New Textile', disabled: !helpers.textile, action: function () { launchApp(helpers.textile); } }, { label: 'Console', disabled: !helpers.console, action: function () { launchApp(helpers.console); } },
       { label: 'CDMI', submenu: function () { return [
@@ -1700,7 +1711,7 @@
       { label: 'Pager: ' + (CFG.pagerVisible ? 'visible' : 'hidden') + ' (toggle)', action: function () { CFG.pagerVisible = !CFG.pagerVisible; if (pagerEl) pagerEl.style.display = CFG.pagerVisible ? 'grid' : 'none'; } },
       { label: 'Dark mode: ' + (isDark() ? 'on' : 'off') + ' (toggle)', action: function () { setDark(!isDark()); } },
       '-',
-      { label: CD.auth ? 'Sign out' : 'Sign in\u2026', action: function () { if (CD.auth) { CD.auth = null; rescan(); } else signInDialog().then(function (ok) { if (ok) rescan(); }); } },
+      { label: CD.auth ? 'Sign out' : 'Sign in\u2026', action: function () { if (CD.auth) { teardownScreen(); homeReadmeOpened = false; CD.auth = null; rescan(); } else signInDialog().then(function (ok) { if (ok) rescan(); }); } },
       { label: 'Known hosts', action: knownHostsWindow }, { label: 'About', action: aboutDialog }
     ]);
   }
@@ -2039,7 +2050,7 @@
     // A CDMI export is the primary way to publish the container; an HTTP export may be added beside it. When either is
     // checked the export origin and path apply; when neither is, the container is reached by its object ID only, which
     // requires cdmi_object_access_by_ID, and where the server does not publish that at least one export is required.
-    var cdmiExport = h('input', { type: 'checkbox', id: 'pubc' + n }); cdmiExport.checked = true;
+    var cdmiExport = h('input', { type: 'checkbox', id: 'pubc' + n }); cdmiExport.checked = !byId;   // publish off by default; on only where the server has no access by object ID, which then requires an export
     var pubExport = h('input', { type: 'checkbox', id: 'pube' + n }); pubExport.checked = false;
     var path = field('fvxp' + n, 'Export path', '/new-container/');
     var anon = h('input', { type: 'checkbox', id: 'fvxa' + n }); anon.checked = true;
@@ -3408,6 +3419,8 @@
      and home_path naming the home. A home already found as a "home?" reference by discover() is left as it is. */
   var CD_home = null;               // { base, path } once known, so a re-scan can drop it on sign-out
   var vouchedOrigins = {};          // origins of homes the discovery vouched for, to which the credential may go (spec 302 s6)
+  var SCREEN = { num: null, url: null, uuid: null, install: null };   // this browser window's ~/proc/screens/<n> container, once provisioned
+  var homeReadmeOpened = false;     // open a home readme.md once per sign-in (mountHome re-runs on every rescan)
   async function mountHome(found) {
     disks.forEach(function (d, i) { if (d.fromUserinfo) disks[i] = null; }); disks = disks.filter(Boolean);   // drop a home mounted last time
     CD_home = null;
@@ -3440,6 +3453,8 @@
     try { await provisionHomeApps(homeBase, base); } catch (e) { console.warn('[cdmi] home apps: ' + (e && e.message || e)); }
     try { await provisionHomePanels(homeBase, base); } catch (e) { console.warn('[cdmi] home control panels: ' + (e && e.message || e)); }
     try { await provisionHomeFonts(homeBase, base); } catch (e) { console.warn('[cdmi] home fonts: ' + (e && e.message || e)); }
+    try { await provisionHomeScreens(homeBase); } catch (e) { console.warn('[cdmi] home screens: ' + (e && e.message || e)); }
+    openHomeReadme(homeBase);   // best-effort, not awaited: open a home readme.md on sign-in
   }
 
   /* A freshly created home has no applications of its own. Give it an "apps" container that layers the server's
@@ -3503,6 +3518,111 @@
     var probe;
     try { probe = await req(url + '?objectType', T_CONTAINER, { quiet: true, probe: true }); } catch (e) { return; }
     if (probe.status === 404) { var r = await send('PUT', url, T_CONTAINER, JSON.stringify({ metadata: {} })); if (!r.ok) console.warn('[cdmi] create ' + url + ' returned ' + r.status); }
+  }
+
+  /* ~/proc/screens/: one container per live browser window, numbered 1, 2, 3, ... The number is only a display slot
+     (an X11 "screen"); the window's durable identity is a UUID kept in sessionStorage -- so a reload or crash-restore
+     of the same tab re-adopts its own container -- and written into the container's metadata, with a per-browser
+     install id kept in localStorage. There is no heartbeat and no TTL. Cleanup, in order of reliability:
+       - sign-out and clean close delete the container (close uses a keepalive DELETE on pagehide);
+       - a reload re-adopts the same container (by UUID) or re-claims the same number;
+       - a browser reaps its OWN crashed windows at the next login: it lists the screens, asks who is alive on a
+         BroadcastChannel, and deletes any container carrying this install id whose UUID no live window answers for.
+     A screen made by another browser or device can't be told from a live one without a liveness signal, so those
+     leftovers are accepted and left in place. */
+  function lsGet(store, key) { try { return window[store] && window[store].getItem(key); } catch (e) { return null; } }
+  function lsSet(store, key, val) { try { if (window[store]) window[store].setItem(key, val); } catch (e) {} }
+  function newUUID() { try { return crypto.randomUUID(); } catch (e) { return 'x' + Date.now().toString(16) + Math.random().toString(16).slice(2); } }
+  function installId() { var u = lsGet('localStorage', 'cvwm.install'); if (!u) { u = newUUID(); lsSet('localStorage', 'cvwm.install', u); } return u; }
+  function screenMeta(uuid, install) {
+    return { cvwm_screen_uuid: uuid, cvwm_screen_install: install,
+      cvwm_screen_principal: (CD.userinfo && CD.userinfo.identifier) || '',
+      cvwm_screen_agent: navigator.userAgent || '', cvwm_screen_platform: navigator.platform || '',
+      cvwm_screen_opened: new Date().toISOString(), cvwm_screen_size: window.innerWidth + 'x' + window.innerHeight };
+  }
+  var screenBus = null;
+  function screenChannel() { if (screenBus === null) { try { screenBus = ('BroadcastChannel' in window) ? new BroadcastChannel('cvwm.screens') : false; } catch (e) { screenBus = false; } } return screenBus || null; }
+  var screenResponder = false;
+  function armScreenResponder() {                                           // a live window answers roll-call pings from its own browser
+    if (screenResponder) return; var ch = screenChannel(); if (!ch) return; screenResponder = true;
+    ch.addEventListener('message', function (ev) { var d = ev && ev.data;
+      if (d && d.t === 'ping' && SCREEN.uuid && d.install === SCREEN.install) { try { ch.postMessage({ t: 'pong', install: SCREEN.install, uuid: SCREEN.uuid }); } catch (e) {} } });
+  }
+  function liveLocalScreens(install, mine) {                                // UUIDs of this browser's windows that answer within the window
+    return new Promise(function (resolve) {
+      var ch = screenChannel(); var live = {}; if (mine) live[mine] = true; if (!ch) { resolve(live); return; }
+      function onMsg(ev) { var d = ev && ev.data; if (d && d.t === 'pong' && d.install === install && d.uuid) live[d.uuid] = true; }
+      ch.addEventListener('message', onMsg);
+      try { ch.postMessage({ t: 'ping', install: install }); } catch (e) {}
+      setTimeout(function () { ch.removeEventListener('message', onMsg); resolve(live); }, 300);
+    });
+  }
+  async function listScreens(screensURL) {                                  // [{ name, url, uuid, install }] for each screen container
+    var out = [], listed;
+    try { listed = await listContainer(screensURL, screensURL, false); } catch (e) { return out; }
+    var kids = (listed.children || []).filter(function (c) { return c.kind === 'container'; });
+    for (var i = 0; i < kids.length; i++) {
+      var url = screensURL + kids[i].name;                                  // the name keeps its trailing "/"
+      try { var md = (await getRep(url + '?metadata', T_CONTAINER, { quiet: true })).rep.metadata || {};
+        out.push({ name: kids[i].name.replace(/\/$/, ''), url: url, uuid: md.cvwm_screen_uuid || null, install: md.cvwm_screen_install || null }); }
+      catch (e) {}
+    }
+    return out;
+  }
+  async function claimNumber(screensURL, n, meta) {                         // atomic create of ~/proc/screens/<n>/: {num,url}, 'taken' (412), or null (error)
+    var url = screensURL + n + '/';
+    var r = await send('PUT', url, T_CONTAINER, JSON.stringify({ metadata: meta }), { 'If-None-Match': '*' });
+    if (r.ok) return { num: n, url: url };
+    if (r.status === 412) return 'taken';
+    return null;
+  }
+  async function allocateScreen(screensURL, meta, prefer) {                 // re-claim the preferred number if free, else the lowest free one
+    if (prefer) { var p = await claimNumber(screensURL, prefer, meta); if (p && p !== 'taken') return p; }
+    for (var n = 1; n <= 9999; n++) { var c = await claimNumber(screensURL, n, meta); if (c === 'taken') continue; return c; }
+    return null;
+  }
+  async function reapOwnDead(screensURL, install, myUUID) {                 // delete this browser's own crashed windows (never another install's, never our own)
+    if (!screenChannel()) return;                                          // no roll-call => can't tell a live sibling window from a dead one, so reap nothing
+    var all = await listScreens(screensURL); if (!all.length) return;
+    var live = await liveLocalScreens(install, myUUID);
+    all.forEach(function (s) { if (s.install === install && s.uuid && s.uuid !== myUUID && !live[s.uuid]) send('DELETE', s.url, T_CONTAINER).catch(function () {}); });
+  }
+  var screenHooks = false;
+  async function provisionHomeScreens(homeBase) {
+    var screensURL = homeBase + CFG.procDir + CFG.screensDir;
+    await ensureContainer(homeBase + CFG.procDir);                          // ~/proc/
+    await ensureContainer(screensURL);                                      // ~/proc/screens/
+    var uuid = lsGet('sessionStorage', 'cvwm.screen.uuid');
+    if (!uuid) { uuid = newUUID(); lsSet('sessionStorage', 'cvwm.screen.uuid', uuid); }
+    var install = installId(), prefNum = parseInt(lsGet('sessionStorage', 'cvwm.screen.num'), 10) || null;
+    SCREEN.uuid = uuid; SCREEN.install = install;
+    var adopted = null;                                                     // reload / crash-restore: re-adopt our own container by UUID
+    try { var all = await listScreens(screensURL); for (var i = 0; i < all.length; i++) if (all[i].uuid === uuid) { adopted = all[i]; break; } } catch (e) {}
+    if (adopted) { SCREEN.num = parseInt(adopted.name, 10) || null; SCREEN.url = adopted.url; }
+    else { var a = await allocateScreen(screensURL, screenMeta(uuid, install), prefNum); if (a) { SCREEN.num = a.num; SCREEN.url = a.url; } }
+    if (!SCREEN.url) return;                                                // could not create (permissions): no screen this session
+    lsSet('sessionStorage', 'cvwm.screen.num', String(SCREEN.num));
+    armScreenResponder();
+    if (!screenHooks) { screenHooks = true; window.addEventListener('pagehide', screenBeaconDelete); }
+    reapOwnDead(screensURL, install, uuid).catch(function () {});           // clean our own crashed windows, in the background
+  }
+  function screenBeaconDelete() {                                           // best-effort teardown on close/reload; keepalive lets it outlive the page
+    if (!SCREEN.url || !CD.auth) return;
+    try { CD.fetch(SCREEN.url, { method: 'DELETE', headers: { Accept: T_CONTAINER, Authorization: CD.auth }, keepalive: true, credentials: 'same-origin' }); } catch (e) {}
+  }
+  function teardownScreen() {                                               // explicit teardown on sign-out, while we still hold the credential
+    if (SCREEN.url && CD.auth) send('DELETE', SCREEN.url, T_CONTAINER).catch(function () {});
+    SCREEN.num = null; SCREEN.url = null;
+  }
+  // On sign-in, open a readme.md at the root of the home, if there is one. Done once per sign-in: mountHome re-runs on
+  // each rescan, so a flag (cleared at sign-out) keeps it from reopening. Best-effort and never blocks the desktop.
+  async function openHomeReadme(homeBase) {
+    if (homeReadmeOpened) return;
+    try {
+      var listed = await listContainer(homeBase, homeBase, false), kids = listed.children || [], found = null;
+      for (var i = 0; i < kids.length; i++) { var nm = kids[i].name.replace(/\/$/, ''); if (kids[i].kind === 'object' && /^readme\.md$/i.test(nm)) { found = nm; break; } }
+      if (found) { homeReadmeOpened = true; openObject(homeBase + enc(found), found, null); }
+    } catch (e) { /* no readme, or the home could not be listed */ }
   }
   /* A cross-origin home is mounted only when that origin answers a CORS preflight for this desktop (spec 302 s6);
      the credential carried there must be audience-bound, which the server side arranges. */
@@ -3819,8 +3939,9 @@
         'ids:function(c){var k=map[c];if(!k)return [];return Object.keys(k.kind==="collection"?(k.data||{}):(k.items||{}));},' +
         'has:function(c,i){return E(c,i)!==undefined;}};}';
       var doc = '<!doctype html><html><head><meta charset="utf-8"><base href="' + containerURL.replace(/"/g, '%22') + '"><title>' + label.replace(/[<&]/g, '') + '</title>' +
-        '<style>' + SCROLLBAR_CSS + '\nhtml,body{margin:0;height:100%;background:#000;color:#ddd}</style><script>(function(){var D=parent.cvwm,c=' + json + ';' +
+        '<style>' + SCROLLBAR_CSS + '\nhtml,body{margin:0;height:100%;background:transparent;color:#ddd}</style><script>(function(){var D=parent.cvwm,c=' + json + ';' +
         'c.setTitle=function(t){D.app(c.id,"title",String(t))};c.resize=function(w,h){D.app(c.id,"resize",[+w,+h])};c.fixed=function(w,h){D.app(c.id,"fixed",[+w,+h])};c.fixedHeight=function(w,h){D.app(c.id,"fixheight",[+w,+h])};c.visible=function(v){D.app(c.id,"visible",!!v)};c.aspect=function(r){D.app(c.id,"aspect",+r||0)};c.setDirty=function(d){D.app(c.id,"dirty",!!d)};c.close=function(){D.app(c.id,"close")};c.open=function(u){D.app(c.id,"open",String(u))};' +
+        'c.console={};["log","info","warn","error","debug"].forEach(function(lv){c.console[lv]=function(){var a=[];for(var i=0;i<arguments.length;i++)a.push(arguments[i]);D.app(c.id,"log",[lv,a]);};});' +
         'D.capture(window,c.id);c.desktop=D;c.net=D.netFor(c.id);var p=D.app(c.id,"process");if(p){c.argv=p.argv;c.cwd=p.cwd;c.stdout=p.stdout;c.stderr=p.stderr;c.shell=p.shell;c.exit=function(n){D.app(c.id,"exit",n|0)};}' +
         mkMgr +
         'function run(){var s=document.createElement("script");s.src=c.__entry;(document.body||document.documentElement).appendChild(s);}' +
@@ -3956,6 +4077,27 @@
       openContainer(self.disk.base + p.split('/').map(enc).join('/'), { into: self });
     });
     this.grid.addEventListener('pointerdown', function (ev) { if (ev.target === self.grid) self.select(null); });
+    // Arrow keys move the selection: left/right step through the children, up/down move by a row. In list view the
+    // children are one per row, so the row count is 1 and up/down are the natural previous/next. The number of columns
+    // is measured from the laid-out items (those sharing the first item's top edge), so it follows the icon view's wrap.
+    this.grid.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight' && ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown') return;
+      var items = Array.prototype.filter.call(self.grid.children, function (n) { return n.classList && n.classList.contains('fv-item'); });
+      if (!items.length) return;
+      var sel = self.grid.querySelector('.fv-item.sel');
+      var cur = sel ? items.indexOf(sel) : (items.indexOf(document.activeElement));
+      var cols = 1, top = items[0].offsetTop;
+      for (var i = 0; i < items.length && items[i].offsetTop === top; i++) cols = i + 1;
+      var next = cur;
+      if (cur < 0) next = 0;
+      else if (ev.key === 'ArrowRight') next = Math.min(items.length - 1, cur + 1);
+      else if (ev.key === 'ArrowLeft') next = Math.max(0, cur - 1);
+      else if (ev.key === 'ArrowDown') next = Math.min(items.length - 1, cur + cols);
+      else if (ev.key === 'ArrowUp') next = Math.max(0, cur - cols);
+      ev.preventDefault();
+      self.select(items[next]); items[next].focus();
+      self.status.textContent = (items[next].title || '').split('  (')[0] || self.baseStatus || '';
+    });
     // A right-click on the empty background of the container view offers what can be created here.
     this.grid.addEventListener('contextmenu', function (ev) {
       if (ev.target !== self.grid && !(ev.target.closest && ev.target.closest('.fv-note'))) return;    // items carry their own menu
@@ -4277,7 +4419,7 @@
     try {
       var there = await req(dest + '?objectName', type, { quiet: true });
       if (there.ok) { messageBox('Cannot rename', (isC ? 'A container' : 'An object') + ' named ' + newBase + ' is already there.'); browser.show(browser.url); return; }
-      var body = { move: url };   // the absolute source URI; a "~/" shorthand path is not one the server accepts
+      var body = { move: sourceURI(url) };   // the absolute source URI, path decoded (see sourceURI); "~/" is a display shorthand the server does not accept
       var res = await send('PUT', dest, type, JSON.stringify(body));
       if (!res.ok) throw await toError(res);
       [parent, url].forEach(function (u) { delete appCache[u]; delete iconCache[u]; delete iconKnown[u]; delete expImpCache[u]; delete expImpCache[stripQuery(u)]; });
@@ -4399,6 +4541,8 @@
         isApp = true; pic.innerHTML = icon('app', px); if (kindCell) kindCell.textContent = 'Application';
         loadIcon(url).then(function (src) { if (src && pic.isConnected) { pic.textContent = ''; pic.appendChild(iconImg(src, px)); } });
       }
+      // Any container may carry its own icon (index.svg preferred, else index.png), whether or not it is an application.
+      function showCustomIcon() { return loadIcon(url).then(function (src) { if (src && pic.isConnected && !isApp) { pic.textContent = ''; pic.appendChild(iconImg(src, px)); } }); }
       function open(browse) {
         if (c.kind === 'container') openContainer(url, { into: self, browse: browse });
         else openObject(url, c.name, self);     // a reference is followed by fetch(); openObject looks at what it led to
@@ -4444,7 +4588,8 @@
         if (c.inside) {                                   // the extended listing already said what this child holds
           appCache[url] = c.inside.indexOf(CFG.appEntry) >= 0; iconKnown[url] = pickIcon(c.inside);
           if (appCache[url]) becomeApp();
-        } else if (sink.length < CFG.probeLimit) sink.push(function () { return probeApp(url).then(function (yes) { if (yes) becomeApp(); }); });
+          else if (iconKnown[url]) showCustomIcon();       // a plain container with its own index.svg/png icon
+        } else if (sink.length < CFG.probeLimit) sink.push(function () { return probeApp(url).then(function (yes) { return yes ? becomeApp() : showCustomIcon(); }); });
         // The exports/imports fields are not carried by a listing, so each container child is read once to find whether it
         // defines either. The badge is shown in icon view only; the list view does not carry it.
         if (!asList && sink.length < CFG.probeLimit) sink.push(function () { return probeExpImp(url).then(markExpImp); });
@@ -4762,6 +4907,7 @@
       // dark until it chooses to show (e.g. after a font is picked); every other app reveals as soon as it sizes itself.
       if (w.pendingReveal && what !== 'visible' && what !== 'close' && what !== 'exit') w.setVisible(true);
       if (what === 'exit') { w.exitCode = arg; w.close(true); }
+      else if (what === 'log') { var lv = arg[0]; if (['log', 'info', 'warn', 'error', 'debug'].indexOf(lv) < 0) lv = 'log'; try { logAdd(lv, 'console', w.title || id, describeArgs(arg[1] || [])); } catch (e) { /* never break the app */ } }
       else if (what === 'visible') w.setVisible(arg); else if (what === 'title') w.setTitle(arg); else if (what === 'close') w.close(true); else if (what === 'resize') w.resizeTo(arg[0], arg[1]); else if (what === 'fixed') { w.resizeTo(arg[0], arg[1]); w.setFixed(true); } else if (what === 'fixheight') { w.resizeTo(arg[0], arg[1]); w.setFixedHeight(true); } else if (what === 'aspect') w.setAspect(arg); else if (what === 'dirty') w.dirty = arg; else if (what === 'open') API.open(new URL(arg, CD.origin + '/').href);
     }
   };
@@ -4779,15 +4925,19 @@
     function sizeView() { view.style.width = vw() * CFG.desksX + 'px'; view.style.height = vh() * CFG.desksY + 'px'; WM.wins.forEach(function (w) { if (w.maxed) { if (w.aspect) { w.w = vw(); w.h = w.heightForWidth(w.w); if (w.h > vh()) { w.h = vh(); w.w = Math.round((w.h - 36) * w.aspect) + 14; } w.x = Math.round((vw() - w.w) / 2); w.y = Math.round((vh() - w.h) / 2); } else { w.w = vw(); w.h = vh(); } } w.apply(); }); gotoDesk(WM.desk[0], WM.desk[1]); }
     window.addEventListener('resize', sizeView); sizeView();
 
+    function onDesktop(ev) { return ev.target === root || ev.target === view || ev.target === disksEl || ev.target === iconsEl; }
     root.addEventListener('pointerdown', function (ev) {
       var inMenu = ev.target.closest && ev.target.closest('.fv-menu');
       if (!inMenu) closeMenus();
-      if (ev.target !== root && ev.target !== view && ev.target !== disksEl && ev.target !== iconsEl) return;
+      if (!onDesktop(ev)) return;
       disksEl.querySelectorAll('.sel').forEach(function (n) { n.classList.remove('sel'); });
-      if (ev.button === 0) rootMenu(ev.clientX, ev.clientY);
-      else if (ev.button === 2) popupMenu(ev.clientX, ev.clientY, 'Window List', windowListItems());
+      // The desktop menu is on the right button (below); the left button only dismisses menus and clears the selection.
     });
-    root.addEventListener('contextmenu', function (ev) { if (!(ev.target.closest && ev.target.closest('.fv-text,.fv-in'))) ev.preventDefault(); });
+    root.addEventListener('contextmenu', function (ev) {
+      if (ev.target.closest && ev.target.closest('.fv-text,.fv-in')) return;   // a text field keeps its own menu
+      ev.preventDefault();
+      if (onDesktop(ev)) { closeMenus(); rootMenu(ev.clientX, ev.clientY); }
+    });
     window.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') closeMenus(); });
     /* While files are dragged over the page, iframes stop taking pointer events so the drag reaches the
        window around them; anywhere that is not a drop target refuses the drop instead of navigating to the file. */
