@@ -1,0 +1,77 @@
+{
+ "title": "Locale",
+ "settings": "Settings",
+ "preview": "Preview",
+ "language": "Language",
+ "numbers": "Numbers",
+ "dates": "Dates",
+ "time": "Time",
+ "pv_number": "Number",
+ "pv_shortDate": "Short date",
+ "pv_longDate": "Long date",
+ "pv_time": "Time",
+ "note_session": "Applied for this session. Sign in to a home to save it.",
+ "note_fail": "Could not save to your home ({s}). The setting still applies now.",
+ "opt_numbers": [
+  [
+   "match",
+   "Match language"
+  ],
+  [
+   "point",
+   "1,234.56"
+  ],
+  [
+   "comma",
+   "1.234,56"
+  ],
+  [
+   "space",
+   "1 234,56"
+  ],
+  [
+   "apos",
+   "1’234.56"
+  ]
+ ],
+ "opt_dates": [
+  [
+   "match",
+   "Match language"
+  ],
+  [
+   "iso",
+   "ISO · 2026-11-07"
+  ],
+  [
+   "us",
+   "US · 11/07/2026"
+  ],
+  [
+   "eu",
+   "EU · 07/11/2026"
+  ],
+  [
+   "dot",
+   "Dotted · 07.11.2026"
+  ],
+  [
+   "long",
+   "Long · 7 November 2026"
+  ]
+ ],
+ "opt_time": [
+  [
+   "match",
+   "Match language"
+  ],
+  [
+   "24h",
+   "24-hour · 20:40"
+  ],
+  [
+   "12h",
+   "12-hour · 8:40 PM"
+  ]
+ ]
+}

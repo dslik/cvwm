@@ -11,13 +11,15 @@ UTF-8, anything else as base64. --desktop NAME also stores cvwm.js and index.htm
 that serves its objects to browsers through an HTTP export. Only https: base URIs are accepted. Uses nothing outside the Python standard library.
 """
 import argparse, base64, json, mimetypes, os, ssl, sys, time, urllib.error, urllib.parse, urllib.request
+mimetypes.add_type("image/svg+xml", ".svg")   # so an index.svg icon is stored with the right media type on any host
 
 # Applications are grouped into sub-containers of apps/: the CDMI applications under apps/cdmi/, the general utilities
 # under apps/utils/; the rest sit directly under apps/.
 CDMI_APPS = ["capabilities", "domains", "namespaces", "postcdmi", "queues", "relationships", "servers", "notifications", "query"]
 UTILS_APPS = ["console", "xterm", "capture", "framer"]
 APPS = ["earthworm", "textile", "xclock", "mcpinspector", "mdviewer", "pdfviewer"] + UTILS_APPS + CDMI_APPS
-BIN = ["ls", "pwd", "cat", "head", "hexdump", "stat", "caps", "tree", "df", "echo", "open", "which", "nc", "ssh"]
+BIN = ["ls", "pwd", "cat", "head", "hexdump", "stat", "caps", "tree", "df", "echo", "open", "which", "nc", "ssh", "zip", "unzip"]
+CONTROL_PANELS = ["locale"]   # control panels, installed into /control_panels/ and imported into each home like apps
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Test commands are optional and not part of a release package: whatever directories exist under dev/tests/ (none in a
 # release) are offered to --tests, so the installer runs cleanly whether or not they are present.
@@ -108,6 +110,7 @@ def main():
     ap.add_argument("--basic", metavar="USER:PASSWORD", help="basic credentials")
     ap.add_argument("--apps", nargs="*", default=APPS, choices=APPS, help="which applications (default: all; --apps alone: none)")
     ap.add_argument("--bin", nargs="*", default=BIN, choices=BIN, help="which commands (default: all; --bin alone: none)")
+    ap.add_argument("--panels", nargs="*", default=CONTROL_PANELS, choices=CONTROL_PANELS, help="which control panels into /control_panels/ (default: all; --panels alone: none)")
     ap.add_argument("--tests", nargs="*", default=TESTS, choices=TESTS, help="which test commands into /dev/tests (default: all; --tests alone: none)")
     ap.add_argument("--desktop", metavar="NAME", help="also store cvwm.js and index.html in this container")
     ap.add_argument("--no-verify", action="store_true", help="accept a self-signed certificate (the connection is still TLS)")
@@ -134,6 +137,9 @@ def main():
             copy_container_acl(base, "apps/", "apps/" + grp, headers, context)   # a group container carries apps/'s ACL
         jobs += [app_job(a) for a in args.apps]
     if args.bin: put(base + "bin/", "application/cdmi-container", {"metadata": {}}, headers, context); jobs += [("bin/" + b, os.path.join(HERE, "bin", b), None) for b in args.bin]
+    if args.panels:
+        put(base + "control_panels/", "application/cdmi-container", {"metadata": {}}, headers, context)
+        jobs += [("control_panels/" + p, os.path.join(HERE, "control_panels", p), None) for p in args.panels]
     if args.tests:
         put(base + "dev/", "application/cdmi-container", {"metadata": {}}, headers, context); put(base + "dev/tests/", "application/cdmi-container", {"metadata": {}}, headers, context)
         jobs += [("dev/tests/" + t, os.path.join(HERE, "dev", "tests", t), None) for t in args.tests]
@@ -142,10 +148,10 @@ def main():
         # as an application (a container with an index.js), rather than trying to run the window manager in a window.
         jobs.append((args.desktop.strip("/"), HERE, ["cvwm.js", "index.html", "index.js", "index.png"]))
     for app, folder, only in jobs:
-        # An application is serialized from its apps/ source and installed with one deserialize, which recreates the
-        # container and everything in it, its resource fork included. apps/ is the only stored copy of its files.
-        # The desktop, bin and tests jobs are not applications, so they write files (and the system fork) directly.
-        if app.startswith("apps/"):
+        # An application (or a control panel, which can carry a resource fork) is serialized from its source and
+        # installed with one deserialize, which recreates the container and everything in it, its rsrc/ fork included.
+        # The desktop, bin and tests jobs are not serialized: they write files directly.
+        if app.startswith("apps/") or app.startswith("control_panels/"):
             name = app.split("/")[-1]
             blob = serialize(folder, name, is_fork=False)
             deserialize_package(base, app, blob, name + ".cdmi", headers, context)

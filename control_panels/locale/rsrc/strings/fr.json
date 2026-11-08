@@ -1,0 +1,77 @@
+{
+ "title": "Région et langue",
+ "settings": "Réglages",
+ "preview": "Aperçu",
+ "language": "Langue",
+ "numbers": "Nombres",
+ "dates": "Dates",
+ "time": "Heure",
+ "pv_number": "Nombre",
+ "pv_shortDate": "Date courte",
+ "pv_longDate": "Date longue",
+ "pv_time": "Heure",
+ "note_session": "Appliqué pour cette session. Connectez-vous à un espace personnel pour l’enregistrer.",
+ "note_fail": "Impossible d’enregistrer dans votre espace ({s}). Le réglage s’applique quand même.",
+ "opt_numbers": [
+  [
+   "match",
+   "Selon la langue"
+  ],
+  [
+   "point",
+   "1,234.56"
+  ],
+  [
+   "comma",
+   "1.234,56"
+  ],
+  [
+   "space",
+   "1 234,56"
+  ],
+  [
+   "apos",
+   "1’234.56"
+  ]
+ ],
+ "opt_dates": [
+  [
+   "match",
+   "Selon la langue"
+  ],
+  [
+   "iso",
+   "ISO · 2026-11-07"
+  ],
+  [
+   "us",
+   "US · 11/07/2026"
+  ],
+  [
+   "eu",
+   "UE · 07/11/2026"
+  ],
+  [
+   "dot",
+   "Avec points · 07.11.2026"
+  ],
+  [
+   "long",
+   "Long · 7 novembre 2026"
+  ]
+ ],
+ "opt_time": [
+  [
+   "match",
+   "Selon la langue"
+  ],
+  [
+   "24h",
+   "24 heures · 20:40"
+  ],
+  [
+   "12h",
+   "12 heures · 8:40 PM"
+  ]
+ ]
+}

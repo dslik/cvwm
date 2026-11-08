@@ -19,6 +19,7 @@ This updates the files cvwm is served from; it does not touch the store's data, 
 configuration. After it finishes, reload the desktop in the browser (a hard reload, so the new cvwm.js is fetched).
 """
 import argparse, base64, json, mimetypes, os, re, ssl, sys, time, urllib.error, urllib.parse, urllib.request
+mimetypes.add_type("image/svg+xml", ".svg")   # so an index.svg icon is stored with the right media type on any host
 
 # The same sets install.py uses; kept here so an update covers exactly what an install laid down.
 # Keep APPS/BIN/TESTS in sync with install.py, so an update deploys exactly what an install would.
@@ -27,7 +28,8 @@ import argparse, base64, json, mimetypes, os, re, ssl, sys, time, urllib.error, 
 CDMI_APPS = ["capabilities", "domains", "namespaces", "postcdmi", "queues", "relationships", "servers", "notifications", "query"]
 UTILS_APPS = ["console", "xterm", "capture", "framer"]
 APPS = ["earthworm", "textile", "xclock", "mcpinspector", "mdviewer", "pdfviewer"] + UTILS_APPS + CDMI_APPS
-BIN = ["ls", "pwd", "cat", "head", "hexdump", "stat", "caps", "tree", "df", "echo", "open", "which", "nc", "ssh"]
+BIN = ["ls", "pwd", "cat", "head", "hexdump", "stat", "caps", "tree", "df", "echo", "open", "which", "nc", "ssh", "zip", "unzip"]
+CONTROL_PANELS = ["locale"]
 TESTS = ["vtest", "cryptotest"]
 SCRIPT_VERSION = "1.1.0"   # update-cvwm.py (semver)
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -248,6 +250,7 @@ def main():
     ap.add_argument("--basic", metavar="USER:PASSWORD", help="basic credentials")
     ap.add_argument("--apps", nargs="*", default=APPS, choices=APPS, help="which applications (default: all; --apps alone: none)")
     ap.add_argument("--bin", nargs="*", default=BIN, choices=BIN, help="which commands (default: all; --bin alone: none)")
+    ap.add_argument("--panels", nargs="*", default=CONTROL_PANELS, choices=CONTROL_PANELS, help="which control panels in /control_panels/ (default: all; --panels alone: none)")
     ap.add_argument("--tests", nargs="*", default=TESTS, choices=TESTS, help="which tests under /dev/tests (default: all; --tests alone: none)")
     ap.add_argument("--desktop", metavar="NAME", help="also update cvwm.js and index.html in this container")
     ap.add_argument("--prune", action="store_true", help="delete deployed files this package no longer contains (containers are never deleted)")
@@ -285,6 +288,10 @@ def main():
         jobs.append(("apps/" + grp + a, folder, None))
     for b in args.bin:
         jobs.append(("bin/" + b, os.path.join(PKG, "bin", b), None))
+    if args.panels:
+        ensure_container(http, base + "control_panels/", created)
+        for pnl in args.panels:
+            jobs.append(("control_panels/" + pnl, os.path.join(PKG, "control_panels", pnl), None))
     if args.tests:
         ensure_container(http, base + "dev/", created)
         for t in args.tests:
@@ -294,10 +301,10 @@ def main():
         jobs.append((args.desktop.strip("/"), PKG, ["cvwm.js", "index.html", "index.js", "index.png"]))
 
     for rel, folder, only in jobs:
-        # An application is serialized from its apps/ source and updated with one deserialize, which recreates the whole
-        # container (its resource fork included), replacing the deployed copy wholesale. apps/ is the only stored copy.
-        # The desktop, bin and tests jobs are not applications, so they write files (and the system fork) directly.
-        if rel.startswith("apps/"):
+        # An application (or a control panel, which can carry a resource fork) is serialized from its source and updated
+        # with one deserialize, which recreates the whole container (its rsrc/ fork included). The desktop, bin and
+        # tests jobs are not serialized: they write files directly.
+        if rel.startswith("apps/") or rel.startswith("control_panels/"):
             if not os.path.isdir(folder):
                 print("skipping %s: not in this package" % rel)
                 continue

@@ -1,6 +1,6 @@
 /*!
  * cvwm - the CDMI Virtual Window Manager: an X11 / FVWM style desktop for CDMI 3 servers, in one plain JavaScript file.
- * cvwm version: 2.100.0
+ * cvwm version: 2.102.0
  *
  *   <!doctype html><meta charset="utf-8"><title>cvwm</title><script src="cvwm.js"></script>
  *
@@ -17,7 +17,7 @@
  * A new home is given an "apps" container that layers the server's published apps (a read-only CDMI import)
  * beneath the home's own, so every account has the applications without a copy.
  * A container that holds "index.js" is an application: opening it runs that script in an iframe,
- * and an "index.png" beside it is the application's icon. Two containers at the root of a disk have a
+ * and an "index.svg" (preferred) or "index.png" beside it is the application's icon. Two containers at the root of a disk have a
  * convention: /apps/<name>/ holds the applications cvwm's menus offer and the xterm starts by name, and
  * /bin/<name>/ holds commands the xterm runs (see DEVELOPERS.md). One extended child listing
  * (childfields=objectType;objectName;children) tells both for every child of a container at once.
@@ -44,7 +44,10 @@
     focus: PARAMS.get('focus') || attr('data-focus') || 'sloppy',
     appEntry: 'index.js',
     appIcon: 'index.png',
+    appIcons: ['index.svg', 'index.png'],   // an application/control-panel icon, SVG preferred over PNG
     appsDir: 'apps/',
+    panelsDir: 'control_panels/',   // control panels: imported into the home like apps (see provisionHomePanels)
+    procDir: 'proc/',               // where a control panel keeps its JSON config (~/proc/control_panels/<name>)
     binDir: 'bin/',
     pageSize: 200,
     maxChildren: 5000,
@@ -68,7 +71,7 @@
   /* A value is returned only where a read selects it, so reading an object's value names these fields. */
   var VALUE_FIELDS = '?objectType&objectName&objectID&mimetype&metadata&valuetransferencoding&valuerange&value';
   var MOUNTS_KEY = 'cvwm.mounts', VIEW_KEY = 'cvwm.view';
-  var VERSION = '2.100.0';                 // the running build; a change purges cvwm's saved state (see below)
+  var VERSION = '2.102.0';                 // the running build; a change purges cvwm's saved state (see below)
   var VERSION_KEY = 'cvwm.version';
 
   /* Saved state is namespaced under "cvwm." in localStorage: mounts, the icon/list view choice, known hosts and
@@ -1278,7 +1281,7 @@
 
   /* Read a container and enumerate its children, paging with children=<range>. One extended listing,
      childfields=objectType;objectName;children, gives each child's type and its own child list, which is how the
-     browser learns which child containers hold index.js and index.png without a request per child.
+     browser learns which child containers hold index.js and an icon without a request per child.
 
      Where that is refused the container is read plainly: types then come from the form of each name, and
      applications are found by probing. A 400 means the server does not understand the selection, and is remembered
@@ -2904,6 +2907,31 @@
     prog.done('Serialized to ' + dest + ' (via the source server)');
     refreshShowing(dest);
   }
+  /* ------------------------------------------------------------------ Download a data object
+   *
+   * "Download…" saves a data object's value to the browser's downloads as a file of its own name and media type. It
+   * is a plain blob download (not an OS drag), so it works in every browser, and it reads the value with the
+   * signed-in user's credentials like any other request. To download something compressed, zip it first with the
+   * xterm's `zip` command and download the resulting archive object.
+   */
+  function saveBlob(blob, filename) {
+    var href = URL.createObjectURL(blob), a = h('a', { href: href, download: filename || 'download', style: 'display:none' });
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { a.remove(); URL.revokeObjectURL(href); }, 4000);   // free the blob once the download has started
+  }
+  async function downloadObject(url, name) {
+    name = name || safeDecode(stripQuery(url).replace(/\/$/, '').split('/').pop() || 'object');
+    var prog = progressWindow('Download · ' + name);
+    prog.set('Reading ' + name + ' …', 20);
+    try {
+      var got = await readObject(url), v = await readValue(got);
+      var bytes = v.bytes !== undefined ? v.bytes : new TextEncoder().encode(v.text || '');
+      var blob = new Blob([bytes], { type: v.mime || 'application/octet-stream' });
+      saveBlob(blob, name);
+      prog.done('Downloaded ' + name + ' (' + sizeLabel(blob.size) + ').');
+    } catch (e) { prog.fail('Could not download ' + name + ': ' + (e && e.message || e)); }
+  }
+
   async function deserializeHere(url, label) {
     var n = ++uid;
     var src = field('fvds' + n, 'Source', ''); src.input.placeholder = 'a serialized object: URL or path';
@@ -3393,6 +3421,7 @@
     disks.push({ name: 'home', base: homeBase, home: true, fromUserinfo: true, crossOrigin: !sameOrigin(base) });
     CD_home = { base: base, path: path };
     try { await provisionHomeApps(homeBase, base); } catch (e) { console.warn('[cdmi] home apps: ' + (e && e.message || e)); }
+    try { await provisionHomePanels(homeBase, base); } catch (e) { console.warn('[cdmi] home control panels: ' + (e && e.message || e)); }
   }
 
   /* A freshly created home has no applications of its own. Give it an "apps" container that layers the server's
@@ -3419,6 +3448,31 @@
     ];
     var im = await send('PUT', appsURL, T_CONTAINER, JSON.stringify({ metadata: {}, imports: imports }));
     if (!im.ok) console.warn('[cdmi] home apps: setting imports returned ' + im.status);
+  }
+  /* The home's control panels, provisioned exactly like its apps: ~/control_panels/ layers the user's own panels
+     (the writable "self" layer, so a panel dropped in ~/control_panels/ overrides an imported one) over a read-only
+     CDMI import of the server's /control_panels/. And ~/proc/control_panels/ is a plain container where each panel
+     keeps its JSON configuration (e.g. ~/proc/control_panels/locale). Both are best-effort and done once. */
+  async function provisionHomePanels(homeBase) {
+    var panelsURL = homeBase + CFG.panelsDir;
+    var probe;
+    try { probe = await req(panelsURL + '?objectType', T_CONTAINER, { quiet: true, probe: true }); } catch (e) { return; }
+    if (probe.status === 404) {
+      var imports = [
+        { type: 'self', write_enabled: 'true' },
+        { type: 'CDMI', import_uri: '/' + CFG.panelsDir, write_enabled: 'false' }
+      ];
+      var im = await send('PUT', panelsURL, T_CONTAINER, JSON.stringify({ metadata: {}, imports: imports }));
+      if (!im.ok) console.warn('[cdmi] home control panels: setting imports returned ' + im.status);
+    }
+    await ensureContainer(homeBase + CFG.procDir);                       // ~/proc/
+    await ensureContainer(homeBase + CFG.procDir + 'control_panels/');   // ~/proc/control_panels/
+  }
+  // Create a plain container if it is missing; leave it alone otherwise. Best-effort (a 401/403 is not ours to make).
+  async function ensureContainer(url) {
+    var probe;
+    try { probe = await req(url + '?objectType', T_CONTAINER, { quiet: true, probe: true }); } catch (e) { return; }
+    if (probe.status === 404) { var r = await send('PUT', url, T_CONTAINER, JSON.stringify({ metadata: {} })); if (!r.ok) console.warn('[cdmi] create ' + url + ' returned ' + r.status); }
   }
   /* A cross-origin home is mounted only when that origin answers a CORS preflight for this desktop (spec 302 s6);
      the credential carried there must be audience-bound, which the server side arranges. */
@@ -3516,7 +3570,7 @@
     disks = foundHome.concat(loadManual().map(function (m) { return { name: m.name, base: m.base, manual: true, crossOrigin: !sameOrigin(m.base) }; })
       .filter(function (m) { return !foundHome.some(function (f) { return f.base === m.base; }); }));
     try { await mountHome(found); } catch (e) { console.warn('[cdmi] home: ' + (e && e.message || e)); }
-    drawDisks(); vouchCrossOrigin(); locateHelpers();
+    drawDisks(); vouchCrossOrigin(); locateHelpers(); loadLocaleFromHome();
     if (!disks.length) {
       if (found === null) connectDialog(problem ? 'Discovery failed: ' + problem + '. Enter a base URI to mount it as a disk.'
         : 'No discovery tree at this origin: GET ' + WELL_KNOWN + 'cdmi_namespaces/ returned 404. Enter a base URI to mount it as a disk.');
@@ -3572,15 +3626,28 @@
     return null;
   }
 
-  /* index.png beside index.js, as a blob: URL. iconKnown records what a listing said, so nothing is
-     asked for where a listing already showed there is no icon. */
+  /* An application's icon beside its index.js (index.svg preferred, else index.png), as a blob: URL. iconKnown
+     records what a listing said -- the icon's own name when one is present, or false -- so nothing is asked for where
+     a listing already showed there is no icon, and the right file is read in one request where it did. */
   var iconKnown = {}, iconCache = {};
+  function pickIcon(names) {       // from a container's child names: the preferred icon present, false if none, undefined if unknown
+    if (!names) return undefined;
+    for (var i = 0; i < CFG.appIcons.length; i++) if (names.indexOf(CFG.appIcons[i]) >= 0) return CFG.appIcons[i];
+    return false;
+  }
+  function iconBlob(containerURL, names, i) {
+    if (i >= names.length) return Promise.resolve(null);
+    return readObject(containerURL + enc(names[i]), { quiet: true }).then(readValue).then(function (v) {
+      var bytes = (v.bytes && v.bytes.length) ? v.bytes : (v.text ? new TextEncoder().encode(v.text) : null);
+      if (!bytes) return iconBlob(containerURL, names, i + 1);
+      var type = /^image\//.test(v.mime) ? v.mime : (/\.svg$/i.test(names[i]) ? 'image/svg+xml' : 'image/png');
+      return URL.createObjectURL(new Blob([bytes], { type: type }));
+    }).catch(function () { return iconBlob(containerURL, names, i + 1); });
+  }
   function loadIcon(containerURL) {
-    if (iconKnown[containerURL] === false) return Promise.resolve(null);
-    if (!iconCache[containerURL]) iconCache[containerURL] = readObject(containerURL + enc(CFG.appIcon), { quiet: true }).then(readValue).then(function (v) {
-      if (!v.bytes || !v.bytes.length) return null;
-      return URL.createObjectURL(new Blob([v.bytes], { type: /^image\//.test(v.mime) ? v.mime : 'image/png' }));
-    }).catch(function () { return null; });
+    var known = iconKnown[containerURL];
+    if (known === false) return Promise.resolve(null);
+    if (!iconCache[containerURL]) iconCache[containerURL] = iconBlob(containerURL, typeof known === 'string' ? [known] : CFG.appIcons, 0);
     return iconCache[containerURL];
   }
   function iconImg(src, size) { return h('img', { src: src, width: size, height: size, alt: '', draggable: 'false', style: 'display:block;object-fit:contain' }); }
@@ -3707,6 +3774,7 @@
       var ctx = { id: id, origin: CD.origin, containerURI: containerURL, baseURI: d ? d.base : containerURL, diskName: d ? d.name : '', homeURI: home ? home.base : null, startURI: (extra && extra.start) || null,
         namespaces: disks.map(function (x) { return { name: x.name, baseURI: x.base }; }), headers: CD.auth ? { Authorization: CD.auth } : {},
         principal: (CD.userinfo && CD.userinfo.identifier) || null, mcpUri: (CD.caps && CD.caps.cdmi_mcp_uri) || null,
+        locale: normLocale(LOCALE),                   // the user's locale; apps also follow the live "cvwm.locale" signal
         __entry: blob, __hasRsrc: hasRsrc, __appFork: appFork, __sysFork: sysFork };
       var json = JSON.stringify(ctx).replace(/</g, '\\u003c');
       // The resource manager, built inside the iframe over the maps the parent loaded, so realm-sensitive work (a code
@@ -3919,17 +3987,72 @@
     if (c.kind === 'container') return c.type === T_CAPABILITY ? 'Capabilities' : c.type === T_DOMAIN ? 'Domain' : 'Container';
     return c.mime || 'Data object';
   }
+  /* ------------------------------------------------------------------ locale
+
+     The user's locale -- language (a BCP-47 tag, which is also the Intl locale) and number / date / time formats --
+     is set in the Locale control panel and saved per user at ~/proc/control_panels/locale. The live, cross-window
+     signal is the same-origin localStorage key "cvwm.locale" (exactly as "cvwm.dark" is for the theme): the panel
+     writes it, every window (desktop and app iframes) reads it and re-renders. An absent setting is the desktop's
+     historical default -- ISO dates, 24-hour time, grouped numbers -- so nothing changes until a locale is chosen. */
+  var LOCALE_KEY = 'cvwm.locale';
+  function localeDefaults() { return { language: (navigator.language || 'en-US'), numbers: 'match', dates: 'iso', time: '24h' }; }
+  function normLocale(o) { var d = localeDefaults(); o = o || {}; return { language: o.language || d.language, numbers: o.numbers || d.numbers, dates: o.dates || d.dates, time: o.time || d.time }; }
+  var LOCALE = localeDefaults();
+  function readLocaleSignal() { try { var s = localStorage.getItem(LOCALE_KEY); if (s) LOCALE = normLocale(JSON.parse(s)); } catch (e) { /* no storage */ } }
+  readLocaleSignal();                                   // seed instantly from the shared signal, before the first render
+  function relocalize() { browsers.forEach(function (b) { if (!b.win.closed) b.show(b.url); }); }   // re-render open browsers so dates/sizes reformat
+  window.addEventListener('storage', function (ev) { if (ev.key === LOCALE_KEY) { readLocaleSignal(); relocalize(); } });
+  /* Load the saved locale from the home on sign-in and publish it to the signal. Best-effort: no home, or none saved,
+     leaves the default/signal in place. */
+  async function loadLocaleFromHome() {
+    var home = homeDisk(); if (!home) return;
+    try {
+      var got = await getRep(home.base + CFG.procDir + 'control_panels/locale?value', T_OBJECT, { quiet: true });
+      var raw = got.rep.value; if (got.rep.valuetransferencoding === 'base64') { try { raw = decodeURIComponent(escape(atob(raw))); } catch (e) { raw = atob(raw); } }
+      var cfg = normLocale(JSON.parse(raw)); LOCALE = cfg;
+      try { localStorage.setItem(LOCALE_KEY, JSON.stringify(cfg)); } catch (e) { /* no storage */ }
+      relocalize();
+    } catch (e) { /* none saved */ }
+  }
+
+  function localeGroupSep() { var n = LOCALE.numbers; return n === 'comma' ? '.' : n === 'space' ? '\u202f' : n === 'apos' ? '\u2019' : n === 'point' ? ',' : ''; }
+  function localeDecimalSep() { var n = LOCALE.numbers; return (n === 'comma' || n === 'space') ? ',' : '.'; }
+  function fmtNumber(n) {
+    if (n === null || n === undefined || (typeof n === 'number' && isNaN(n))) return String(n);
+    if (LOCALE.numbers === 'match') { try { return new Intl.NumberFormat(LOCALE.language).format(n); } catch (e) { /* fall through */ } }
+    var neg = n < 0, s = String(Math.abs(n)), parts = s.split('.'), intp = parts[0], g = localeGroupSep();
+    if (g) intp = intp.replace(/\B(?=(\d{3})+(?!\d))/g, g);
+    return (neg ? '-' : '') + intp + (parts[1] !== undefined ? localeDecimalSep() + parts[1] : '');
+  }
+  function p2(n) { return (n < 10 ? '0' : '') + n; }
+  function fmtDate(d) {
+    var y = d.getFullYear(), m = d.getMonth() + 1, day = d.getDate();
+    switch (LOCALE.dates) {
+      case 'us': return p2(m) + '/' + p2(day) + '/' + y;
+      case 'eu': return p2(day) + '/' + p2(m) + '/' + y;
+      case 'dot': return p2(day) + '.' + p2(m) + '.' + y;
+      case 'long': try { return new Intl.DateTimeFormat(LOCALE.language, { day: 'numeric', month: 'long', year: 'numeric' }).format(d); } catch (e) { return y + '-' + p2(m) + '-' + p2(day); }
+      case 'match': try { return new Intl.DateTimeFormat(LOCALE.language).format(d); } catch (e) { return y + '-' + p2(m) + '-' + p2(day); }
+      default: return y + '-' + p2(m) + '-' + p2(day);          // 'iso'
+    }
+  }
+  function fmtTime(d) {
+    if (LOCALE.time === '12h') { var hr = d.getHours(), ap = hr < 12 ? 'AM' : 'PM'; hr = hr % 12 || 12; return hr + ':' + p2(d.getMinutes()) + ' ' + ap; }
+    if (LOCALE.time === 'match') { try { return new Intl.DateTimeFormat(LOCALE.language, { hour: '2-digit', minute: '2-digit' }).format(d); } catch (e) { /* fall through */ } }
+    return p2(d.getHours()) + ':' + p2(d.getMinutes());         // '24h' (default)
+  }
   function sizeLabel(n) {
     if (n === null || n === undefined) return '\u2014';
-    if (n < 1024) return n + ' B';
+    if (n < 1024) return fmtNumber(n) + ' B';
     var units = ['KB', 'MB', 'GB', 'TB'], v = n / 1024, u = 0; while (v >= 1024 && u < units.length - 1) { v /= 1024; u++; }
-    return (v < 10 ? v.toFixed(1) : Math.round(v)) + ' ' + units[u];
+    var num = v < 10 ? v.toFixed(1) : String(Math.round(v));
+    if (localeDecimalSep() !== '.') num = num.replace('.', localeDecimalSep());
+    return num + ' ' + units[u];
   }
   function whenLabel(iso) {
     if (!iso) return '\u2014';
     var d = new Date(iso); if (isNaN(d)) return iso;
-    var p = function (n) { return (n < 10 ? '0' : '') + n; };
-    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    return fmtDate(d) + ' ' + fmtTime(d);
   }
 
   /* What can be defined on an object: exports and imports for containers, data objects and queues, and snapshots for
@@ -4262,6 +4385,7 @@
           { label: 'Open in pdfviewer', disabled: !helpers.pdfviewer || c.kind !== 'object' || !(/\.pdf$/i.test(stripQuery(url))), action: function () { launchApp(helpers.pdfviewer, { start: url }); } },
           { label: 'Open in Textile', disabled: !helpers.textile || c.kind !== 'object', action: function () { launchApp(helpers.textile, { start: url }); } },
           { label: 'View', disabled: c.kind === 'container', action: function () { openObject(url, c.name, self, false, true); } },
+          { label: 'Download…', disabled: c.kind !== 'object', action: function () { downloadObject(url, c.name); } },
           { label: 'Browse contents', disabled: c.kind !== 'container', action: function () { open(true); } },
           { label: 'Open in new window', disabled: c.kind !== 'container', action: function () { openContainer(url, { browse: true }); } },
           { label: 'Open in xterm', disabled: c.kind !== 'container' || !findXterm(), action: function () { launchXterm(url); } },
@@ -4285,7 +4409,7 @@
         acceptDrops(item, function () { return (isApp || (dragging && dragging.url === url)) ? null : url; }, function (t) { self.status.textContent = t; });
         acceptAppOpen(item, function () { return isApp ? url : null; }, function (t) { self.status.textContent = t; });
         if (c.inside) {                                   // the extended listing already said what this child holds
-          appCache[url] = c.inside.indexOf(CFG.appEntry) >= 0; iconKnown[url] = c.inside.indexOf(CFG.appIcon) >= 0;
+          appCache[url] = c.inside.indexOf(CFG.appEntry) >= 0; iconKnown[url] = pickIcon(c.inside);
           if (appCache[url]) becomeApp();
         } else if (sink.length < CFG.probeLimit) sink.push(function () { return probeApp(url).then(function (yes) { if (yes) becomeApp(); }); });
         // The exports/imports fields are not carried by a listing, so each container child is read once to find whether it
