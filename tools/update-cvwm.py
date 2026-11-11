@@ -29,7 +29,7 @@ CDMI_APPS = ["capabilities", "domains", "namespaces", "postcdmi", "queues", "rel
 UTILS_APPS = ["console", "xterm", "capture", "framer"]
 APPS = ["earthworm", "textile", "xclock", "mcpinspector", "mdviewer", "fontviewer"] + UTILS_APPS + CDMI_APPS
 BIN = ["ls", "pwd", "cat", "head", "hexdump", "stat", "caps", "tree", "df", "echo", "open", "which", "nc", "ssh", "zip", "unzip"]
-CONTROL_PANELS = ["locale", "apps"]
+CONTROL_PANELS = ["locale", "apps", "certificates"]
 TESTS = ["vtest", "cryptotest"]
 SCRIPT_VERSION = "1.1.0"   # update-cvwm.py (semver)
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -301,6 +301,11 @@ def main():
         # index.js/index.png: the "this provides the desktop" stub and its icon, so the desktop container is not run as an app.
         jobs.append((args.desktop.strip("/"), PKG, ["cvwm.js", "index.html", "index.js", "index.png"]))
 
+    # The cvwm version this package deploys; stamped into every app's rsrc/manifest.json so the desktop's compatibility
+    # gate can read it (see docs/app-compatibility.md). Taken from cvwm.js, which is always present in the package.
+    built = cvwm_version(open(os.path.join(PKG, "cvwm.js"), encoding="utf-8").read())
+    if not built:
+        raise SystemExit("cannot read this package's cvwm version from cvwm.js; refusing to deploy unstamped apps")
     for rel, folder, only in jobs:
         # An application (or a control panel, which can carry a resource fork) is serialized from its source and updated
         # with one deserialize, which recreates the whole container (its rsrc/ fork included). The desktop, bin and
@@ -311,7 +316,7 @@ def main():
                 continue
             name = rel.split("/")[-1]
             print("%s/  (serialized)" % rel)
-            deserialize_package(http, base, rel, serialize(folder, name, is_fork=False), name + ".cdmi", counts)
+            deserialize_package(http, base, rel, serialize(folder, name, is_fork=False, built_against=built), name + ".cdmi", counts)
             continue
         if not os.path.isdir(folder):
             print("skipping %s: not in this package" % rel)
@@ -326,6 +331,14 @@ def main():
             if os.path.isdir(sys_src):
                 print("%s/rsrc/  (serialized)" % rel)
                 deserialize_package(http, base, rel + "/rsrc", serialize(sys_src, "rsrc", is_fork=True), "rsrc.cdmi", counts)
+            # Stamp the desktop like every other app so it passes the compatibility gate (appCompat reads
+            # rsrc/manifest.json builtAgainst). The desktop is written file-by-file, not serialized, so the
+            # serializer's stamp never runs for it -- write the manifest here, with this package's version.
+            ensure_container(http, base + rel + "/rsrc/", created)
+            http.put(base + rel + "/rsrc/manifest.json", OBJECT,
+                     {"mimetype": "application/json", "metadata": {}, "valuetransferencoding": "utf-8",
+                      "value": json.dumps({"builtAgainst": built}, indent=2)})
+            print("  %-14s %s  (builtAgainst %s)" % ("rsrc/manifest.json", "written", built))
 
     print("\nDone: %d created, %d updated, %d unchanged%s." % (
         counts["create"], counts["update"], counts["same"],

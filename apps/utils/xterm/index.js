@@ -26,8 +26,8 @@
   // Resources: the app's own fork (CTX.rsrc), optional. Absent (a classic install) => every lookup falls back to the
   // built-in default. S() reads a string; the terminal stylesheet is pulled where present.
   var R = CTX.rsrc || null;
-  function S(id, fb) { var v = R && R.text('strings', id); return v == null ? fb : v; }
-  var NAME = S('title', 'xterm');
+  function S(id, vars) { var v = R && R.text('strings', id); if (v == null) return id; if (vars) for (var k in vars) v = v.split('{' + k + '}').join(vars[k]); return v; }
+  var NAME = S('title');
   var ORIGIN = CTX.origin || location.origin;
   var T_CONTAINER = 'application/cdmi-container', T_QUEUE = 'application/cdmi-queue';
   var ACCEPT_DIR = T_CONTAINER + ', application/cdmi-capability;q=0.9, application/cdmi-domain;q=0.9';
@@ -56,21 +56,9 @@
      The shell writes to this the way any program would (its line editor redraws the prompt line with \r and an
      erase), and a running command may take the keyboard over (CDMI_CONTEXT.stdin) and learn the size (.tty). */
   var CSS = document.createElement('style');
-  var DEFAULT_CSS =
-    'html,body{margin:0;height:100%;background:#000;overflow:hidden}' +
-    '#t{box-sizing:border-box;height:100%;overflow-y:auto;overflow-x:hidden;padding:4px 6px;color:#d0d0d0;background:#000;font:13px/18px "DejaVu Sans Mono","Liberation Mono",Menlo,Consolas,monospace;outline:none;cursor:text}' +
-    '#t .r{white-space:pre;height:18px;overflow:hidden}' +
-    '#grid .r{white-space:pre}' +
-    '.f0{color:#000}.f1{color:#ff8a80}.f2{color:#7fd48f}.f3{color:#e6d37a}.f4{color:#8fb8ff}.f5{color:#d8a0ff}.f6{color:#7fdfe0}.f7{color:#d0d0d0}' +
-    '.f8{color:#6a6a6a}.f9{color:#ffb0a8}.f10{color:#a8f0b8}.f11{color:#f5e7a8}.f12{color:#b8d4ff}.f13{color:#e8c4ff}.f14{color:#b0f0f0}.f15{color:#fff}' +
-    '.b0{background:#000}.b1{background:#a03028}.b2{background:#2c7a3c}.b3{background:#8a7a20}.b4{background:#2e4e8e}.b5{background:#7a4a9a}.b6{background:#2a7a7e}.b7{background:#bfbfbf}' +
-    '.b8{background:#444}.b9{background:#d05040}.b10{background:#40a050}.b11{background:#b0a030}.b12{background:#4060c0}.b13{background:#a060c0}.b14{background:#40a0a8}.b15{background:#eee}' +
-    '.B{font-weight:bold}.D{opacity:.6}.I{font-style:italic}.U{text-decoration:underline}.S{text-decoration:line-through}.Rf{color:#000}.Rb{background:#d0d0d0}' +
-    '.cur{outline:1px solid #d0d0d0;outline-offset:-1px}#t.focus .cur{background:#d0d0d0;color:#000;outline:none}' +
-    '::selection{background:#4a6a8a;color:#fff}';
-  CSS.textContent = (R && R.text('styles', 'xterm')) || DEFAULT_CSS;
+  CSS.textContent = R.text('styles', 'xterm');
   document.head.appendChild(CSS);
-  var T = document.createElement('div'); T.id = 't'; T.tabIndex = 0; T.setAttribute('role', 'application'); T.setAttribute('aria-label', S('terminal', 'Terminal'));
+  var T = document.createElement('div'); T.id = 't'; T.tabIndex = 0; T.setAttribute('role', 'application'); T.setAttribute('aria-label', S('terminal'));
   var back = document.createElement('div'), grid = document.createElement('div'); back.id = 'back'; grid.id = 'grid';
   T.appendChild(back); T.appendChild(grid); document.body.appendChild(T);
 
@@ -131,7 +119,7 @@
   function eraseScreen(sc, mode) {
     if (mode === 0) { eraseLine(sc, 0); for (var i = sc.y + 1; i < sc.rows; i++) sc.lines[i].clear(0, sc.cols, sc.bg); }
     else if (mode === 1) { eraseLine(sc, 1); for (i = 0; i < sc.y; i++) sc.lines[i].clear(0, sc.cols, sc.bg); }
-    else { if (sc === term.main && mode === 2) sc.lines.forEach(function (r) { if (r.ch.join('').trim()) pushBack(r); }); for (i = 0; i < sc.rows; i++) sc.lines[i] = new Row(sc.cols); if (mode === 3) { term.scrollback = []; back.textContent = ''; } }
+    else { for (i = 0; i < sc.rows; i++) sc.lines[i] = new Row(sc.cols); if (mode === 3) { term.scrollback = []; back.textContent = ''; } }   // 2J erases the screen in place (standard); it does not push the cleared screen into scrollback -- only real scrolling (scrollUp) does
   }
   function sgr(sc, ps) {
     var p = ps.length ? ps : [0];
@@ -283,7 +271,7 @@
   }
   function err(msg) { print('\x1b[31m' + msg + '\x1b[0m'); }
   function columns() { return term.s.cols; }
-  function clearScreen() { write('\x1b[2J\x1b[H'); }
+  function clearScreen(all) { write((all ? '\x1b[3J' : '') + '\x1b[2J\x1b[H'); }   // all: also wipe scrollback (the `clear` command); bare clearScreen keeps scrollback (Ctrl-L)
 
   /* ---- the line editor, drawn on the screen */
   function promptText() { return '\x1b[32m' + (cwd ? cwd.ns.name : '?') + '\x1b[0m:\x1b[34;1m' + (cwd ? pathStr(cwd) : '') + '\x1b[0m $ '; }
@@ -333,6 +321,13 @@
     term.dirty = true; schedule();
   }
   window.addEventListener('resize', fit);
+  // The app's iframe is display:none (behind its drop pane) until the desktop reveals it, so at boot T has zero width
+  // and size() would floor to the 20-column minimum -- the banner then wraps as if the window were tiny. A window
+  // 'resize' never fires on that reveal, so observe T directly: the ResizeObserver re-fits when the reveal (or any
+  // later layout change) gives T its real width, and whenSized holds the first paint until that width exists so the
+  // banner is laid out at the true column count.
+  if (window.ResizeObserver) { try { new ResizeObserver(function () { fit(); }).observe(T); } catch (e) {} }
+  function whenSized(cb) { if (T.clientWidth > 24) return cb(); var n = 0; (function spin() { if (T.clientWidth > 24 || n++ > 120) return cb(); requestAnimationFrame(spin); })(); }
   reset();
 
   /* ---------------------------------------------------------------- paths */
@@ -433,10 +428,10 @@
     var got;
     try { got = await cdmi(leafURL(loc) + VALUE_FIELDS, ACCEPT_LEAF); }
     catch (e) { if (e.status !== 400) throw e; got = await cdmi(leafURL(loc), ACCEPT_LEAF); }      // the value selection does not apply to a queue or a container; read it as it is
-    if (/cdmi-(container|capability|domain)/.test(got.rep.objectType || '')) throw new Fail(0, S('isContainer', 'is a container'));
+    if (/cdmi-(container|capability|domain)/.test(got.rep.objectType || '')) throw new Fail(0, S('isContainer'));
     if (got.rep.value === undefined && !got.bytes && got.rep.objectType !== T_QUEUE && got.url !== leafURL(loc)) got = await cdmi(got.url + VALUE_FIELDS, T_OBJECT);   // a reference: the redirect dropped our selection
     var rep = got.rep;
-    if (/cdmi-(container|capability|domain)/.test(rep.objectType || '')) throw new Fail(0, S('isContainer', 'is a container'));
+    if (/cdmi-(container|capability|domain)/.test(rep.objectType || '')) throw new Fail(0, S('isContainer'));
     if (rep.objectType === T_QUEUE) return { text: JSON.stringify(rep, null, 2), rep: rep };
     if (got.bytes) return { bytes: got.bytes, rep: rep };
     if (rep.valuetransferencoding === 'json') return { text: JSON.stringify(rep.value, null, 2), rep: rep };
@@ -516,32 +511,32 @@
      Built in: what changes the shell's own state. Everything else is found in /bin (a text command, run in a
      hidden frame here) or /apps (a GUI application, started in a window by cvwm), on the current disk first. */
   var BUILTIN = {
-    cd: { u: S('cdUsage', '[path | -]'), h: S('cdHelp', 'change container; no argument or ~ goes home; follows references; "cd archive:/" changes disk'), run: async function (args) {
-      if (args[0] === '-') { if (!prev) throw new Fail(0, S('noPrevContainer', 'no previous container')); var t = cwd; cwd = prev; prev = t; return retitle(); }
+    cd: { u: S('cdUsage'), h: S('cdHelp'), run: async function (args) {
+      if (args[0] === '-') { if (!prev) throw new Fail(0, S('noPrevContainer')); var t = cwd; cwd = prev; prev = t; return retitle(); }
       var where = args[0] || (HOME ? '~' : '/');
       var at = await locate(resolve(where));
-      if (at.outside) throw new Fail(0, S('outsidePrefix', 'leads outside the mounted namespaces: ') + at.outside);
-      if (!at.dir) throw new Fail(0, S('notContainer', 'not a container'));
+      if (at.outside) throw new Fail(0, S('outsidePrefix') + at.outside);
+      if (!at.dir) throw new Fail(0, S('notContainer'));
       await cdmi(dirURL(at.loc) + '?objectType', ACCEPT_DIR);
       prev = cwd; cwd = { ns: at.loc.ns, segs: at.loc.segs }; retitle();
       void where;
     } },
-    help: { h: S('helpHelp', 'the built-in commands, and what /bin and /apps hold'), run: async function () {
-      print(S('helpIntro', 'Walk CDMI namespaces. Paths are \x1b[1m[disk:]/container/object\x1b[0m; a trailing / means a container.'));
-      print('\x1b[1m' + S('helpBuiltIn', 'Built in') + '\x1b[0m');
+    help: { h: S('helpHelp'), run: async function () {
+      print(S('helpIntro'));
+      print('\x1b[1m' + S('helpBuiltIn') + '\x1b[0m');
       Object.keys(BUILTIN).forEach(function (n) { print('  \x1b[1m' + (n + ' ' + (BUILTIN[n].u || '') + '                        ').slice(0, 26) + '\x1b[0m' + BUILTIN[n].h); });
       var found = await commandTable();
-      [['bin', S('helpBin', 'Commands in /bin')], ['tests', S('helpTests', 'Test commands in /dev/tests')], ['apps', S('helpApps', 'Applications in /apps')]].forEach(function (kd) {
+      [['bin', S('helpBin')], ['tests', S('helpTests')], ['apps', S('helpApps')]].forEach(function (kd) {
         var names = Object.keys(found).filter(function (n) { return found[n].kind === kd[0]; }).sort();
-        print('\x1b[1m' + kd[1] + '\x1b[0m' + (names.length ? '' : S('helpNone', '  (none on any disk)')));
+        print('\x1b[1m' + kd[1] + '\x1b[0m' + (names.length ? '' : S('helpNone')));
         columnsOf(names.map(function (n) { return [n, kd[0] === 'apps' ? 'q' : 'o']; }), columns()).forEach(function (l) { print('  ' + l); });
       });
-      print('\x1b[2m' + S('helpBackground', 'An application started here keeps the prompt until its window closes; end the name with & to get the prompt back at once, or press Ctrl-C.') + '\x1b[0m');
-      print('\x1b[2m' + S('helpKeys', 'Keys: Tab completes, Up/Down history, Ctrl-C interrupts, Ctrl-L clears, Ctrl-A/E/U/K/W edit. A command takes --help.') + '\x1b[0m');
+      print('\x1b[2m' + S('helpBackground') + '\x1b[0m');
+      print('\x1b[2m' + S('helpKeys') + '\x1b[0m');
     } },
-    history: { h: S('historyHelp', 'commands entered so far'), run: async function () { history.forEach(function (l, i) { print('\x1b[2m' + ('    ' + (i + 1)).slice(-4) + '  \x1b[0m' + l); }); } },
-    clear: { h: S('clearHelp', 'clear the screen'), run: async function () { clearScreen(); } },
-    exit: { h: S('exitHelp', 'close this window'), run: async function () { if (CTX.close) CTX.close(); else print(S('noWindow', 'There is no window to close.')); } }
+    history: { h: S('historyHelp'), run: async function () { history.forEach(function (l, i) { print('\x1b[2m' + ('    ' + (i + 1)).slice(-4) + '  \x1b[0m' + l); }); } },
+    clear: { h: S('clearHelp'), run: async function () { clearScreen(true); } },
+    exit: { h: S('exitHelp'), run: async function () { if (CTX.close) CTX.close(); else print(S('noWindow')); } }
   };
 
   /* The names in /bin and /apps on every disk, read once and kept until "rehash" or a cd to another disk. */
@@ -651,7 +646,7 @@
     var name = argv[0];
     if (BUILTIN[name]) return BUILTIN[name].run(argv.slice(1)).then(function () { return 0; });
     var found = (await commandTable())[name];
-    if (!found) throw new Fail(0, S('commandNotFound', 'command not found (try help)'));
+    if (!found) throw new Fail(0, S('commandNotFound'));
     return found.kind === 'apps' ? runApp(found.url, argv) : runText(found.url, argv, found);
   }
 
@@ -804,7 +799,10 @@
     var start = (CTX.startURI && locOfURL(CTX.startURI)) || HOME || (CTX.baseURI && locOfURL(CTX.baseURI)) || { ns: NS[0], segs: [] };
     cwd = { ns: start.ns, segs: start.segs.slice() }; histPos = 0;
     await loadHistory();
-    fit(); print([['CDMI xterm \u2014 type ', 'm'], ['help', 'b'], [' for commands. Disks: ' + NS.map(function (n) { return n.name + ':'; }).join(' '), 'm']]);
-    retitle(); busy = false; drawInput(); T.focus();
+    retitle();
+    whenSized(function () {
+      fit(); print([['CDMI xterm \u2014 type ', 'm'], ['help', 'b'], [' for commands. Disks: ' + NS.map(function (n) { return n.name + ':'; }).join(' '), 'm']]);
+      busy = false; drawInput(); T.focus();
+    });
   })();
 })();

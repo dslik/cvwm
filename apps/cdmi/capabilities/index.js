@@ -9,7 +9,7 @@
    built-in default below and the app runs exactly as before. S() reads a string; the stylesheet, the Annex B catalogue
    and the class titles are pulled from the fork where present. */
 const R = (window.CDMI_CONTEXT || {}).rsrc || null;
-function S(id, fb) { const v = R && R.text("strings", id); return v == null ? fb : v; }
+function S(id, vars) { var v = R && R.text("strings", id); if (v == null) return id; if (vars) for (var k in vars) v = v.split("{" + k + "}").join(vars[k]); return v; }
 
 /* The page this used to be: its stylesheet and its markup, put into the document the desktop gives us. */
 const CSS = `
@@ -162,17 +162,17 @@ const MARKUP = `
   fonts.rel = "stylesheet";
   fonts.href = "https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;600;700&family=Saira:wght@400;500;600;700&display=swap";
   const style = document.createElement("style");
-  style.textContent = (R && R.text("styles", "capabilities")) || CSS;
+  style.textContent = R.text("styles", "capabilities");
   document.head.appendChild(fonts);
   document.head.appendChild(style);
   document.body.innerHTML = MARKUP;          // a constant of this file, never data from a server
   document.documentElement.lang = "en";
   // Primary UI labels come from the fork where present; the MARKUP above carries the built-in English defaults.
   (function () {
-    function setText(sel, id) { const n = document.querySelector(sel); if (n) n.textContent = S(id, n.textContent); }
+    function setText(sel, id) { const n = document.querySelector(sel); if (n) n.textContent = S(id); }
     setText("#state", "reading");
     setText('label[for="filter"]', "filterLabel");
-    const f = document.getElementById("filter"); if (f) f.placeholder = S("filterPlaceholder", f.placeholder);
+    const f = document.getElementById("filter"); if (f) f.placeholder = S("filterPlaceholder");
     const tally = [["#tPresent", "present"], ["#tReported", "reported"], ["#tWithheld", "withheld"], ["#tAbsent", "notImplemented"]];
     tally.forEach(function (pair) {
       const n = document.querySelector(pair[0]); if (!n || !n.parentNode) return;
@@ -180,7 +180,7 @@ const MARKUP = `
       const parent = n.parentNode;
       for (let k = 0; k < parent.childNodes.length; k++) {
         const cn = parent.childNodes[k];
-        if (cn.nodeType === 3 && cn.textContent.trim()) { cn.textContent = S(pair[1], cn.textContent.trim()); break; }
+        if (cn.nodeType === 3 && cn.textContent.trim()) { cn.textContent = S(pair[1]); break; }
       }
     });
   })();

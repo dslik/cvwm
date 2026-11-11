@@ -14,21 +14,13 @@
   // Resources: the app's own fork (CTX.rsrc), optional. Absent (a classic install) => every lookup falls back to the
   // built-in default. S() reads a string; the stylesheet and the day/month name tables are pulled where present.
   var R = CTX.rsrc || null;
-  function S(id, fb) { var v = R && R.text('strings', id); return v == null ? fb : v; }
+  function S(id, vars) { var v = R && R.text('strings', id); if (v == null) return id; if (vars) for (var k in vars) v = v.split('{' + k + '}').join(vars[k]); return v; }
   var opts = { digital: false, seconds: true, chime: false };
   try { opts = Object.assign(opts, JSON.parse(localStorage.getItem('xclock') || '{}')); } catch (e) { /* no storage; the defaults stand */ }
   function keep() { try { localStorage.setItem('xclock', JSON.stringify(opts)); } catch (e) { /* the choice lasts for this window */ } }
 
   var style = document.createElement('style');
-  var DEFAULT_CSS =
-    'html,body{margin:0;height:100%;background:#fff;overflow:hidden;cursor:default;user-select:none;-webkit-user-select:none}' +
-    'body{display:flex;align-items:center;justify-content:center}' +
-    'svg{width:100%;height:100%;display:block}' +
-    '#digital{display:none;font:700 18px/1.2 "DejaVu Sans Mono","Liberation Mono",Menlo,Consolas,monospace;color:#000;text-align:center;padding:6px;white-space:nowrap}' +
-    'body.digital svg{display:none}body.digital #digital{display:block}' +
-    '#hint{position:fixed;left:0;right:0;bottom:3px;text-align:center;font:11px Helvetica,Arial,sans-serif;color:#555;opacity:0;transition:opacity .3s;pointer-events:none}body:hover #hint{opacity:1}' +
-    '@media (prefers-reduced-motion:reduce){#hint{transition:none}}';
-  style.textContent = (R && R.text('styles', 'xclock')) || DEFAULT_CSS;
+  style.textContent = R.text('styles', 'xclock');
   document.head.appendChild(style);
 
   var NS = 'http://www.w3.org/2000/svg';
@@ -46,7 +38,7 @@
   var hour = hand(52, 5.5, 9), minute = hand(80, 4, 9), second = el('line', { x1: 0, y1: 14, x2: 0, y2: -86, stroke: '#c0202c', 'stroke-width': 1.2, 'stroke-linecap': 'round' });
   svg.appendChild(hour); svg.appendChild(minute); svg.appendChild(second); svg.appendChild(el('circle', { r: 2.6, fill: '#000' }));
   var digital = document.createElement('div'); digital.id = 'digital'; digital.setAttribute('role', 'timer');
-  var hint = document.createElement('div'); hint.id = 'hint'; hint.textContent = S('hint', 'click or D: digital \u00B7 S: seconds \u00B7 C: chime');
+  var hint = document.createElement('div'); hint.id = 'hint'; hint.textContent = S('hint');
   document.body.appendChild(svg); document.body.appendChild(digital); document.body.appendChild(hint);
 
   var DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -88,7 +80,7 @@
   });
   window.addEventListener('resize', function () { if (opts.digital) draw(); });
 
-  if (CTX.setTitle) CTX.setTitle(S('title', 'xclock'));
+  if (CTX.setTitle) CTX.setTitle(S('title'));
   if (CTX.resize) CTX.resize(260, 290);
   draw();
 })();

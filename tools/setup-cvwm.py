@@ -51,7 +51,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-SCRIPT_VERSION = "2.110.0"   # setup-cvwm.py (semver)
+SCRIPT_VERSION = "2.142.0"   # setup-cvwm.py (semver)
 HERE_TOOLS = os.path.dirname(os.path.abspath(__file__))   # this script's directory, holding kms-make-dac-keys.mjs
 
 
@@ -503,12 +503,14 @@ class Setup:
         pkg_v = read_version_file(os.path.join(self.cvwm_dir, "VERSION"))
         cvwm_v = read_cvwm_version(os.path.join(self.cvwm_dir, "cvwm.js"))
         seedmi_v = read_seedmi_version(self.seedmi_dir)
+        dc_v = read_seedmi_version(self.dc_dir)
         OUT.heading("seedmi for cvwm")
         OUT.line()
         OUT.pre([
             "package        %s   (cvwm-%s.zip)" % (pkg_v, pkg_v),
             "setup-cvwm.py  %s" % SCRIPT_VERSION,
             "seedmi         %s" % seedmi_v,
+            "seedmi-dc      %s" % dc_v,
             "cvwm           %s" % cvwm_v,
             "",
             "host      %s  (realm %s, base %s)" % (self.host, self.realm, self.base_dn),
@@ -517,6 +519,13 @@ class Setup:
             "cvwm      %s" % self.cvwm_dir,
             "run dir   %s" % self.run,
         ])
+        # Version floor: this script writes [listen].origins (and the host binding), which a controller older than
+        # seedmi-dc 1.6 rejects as an unknown key at startup. Warn rather than refuse -- the version string may be
+        # absent or non-numeric, and the controller's own startup error is clear -- but name the cause up front.
+        dc_parts = [int(x) for x in re.findall(r"\d+", dc_v)[:3]]
+        if dc_parts and tuple(dc_parts) < (1, 6):
+            OUT.warn("seedmi-dc %s is older than 1.6: it will reject the [listen].origins key this setup writes and "
+                     "fail at startup. Upgrade to seedmi-dc 1.8+ (ships in seedmi 0.131)." % dc_v)
 
     # -- phase 1: resolution ------------------------------------------------
     def phase_resolve(self):
@@ -624,11 +633,22 @@ class Setup:
         lines.append("")
         lines.append("[listen]")
         lines += toml_table([
-            ("host", "127.0.0.1"),
+            # The hostname, as [http], [https] and [mcp] bind for seedmi. This bound the loopback address while
+            # the issuer written below, and the metadata and token endpoint a browser follows to it, named the
+            # hostname -- so a browser reaching the authorization server got a connection refused wherever the
+            # hostname resolved to anything but loopback, which this setup expressly permits. dcd binds exactly
+            # this host for the HTTPS, LDAP, StartTLS and KDC ports alike, so the LDAP URLs below name it too.
+            ("host", self.host),
             ("port", https_port),
             ("ldap_port", ldap_port),
             ("certificate_file", os.path.join(pki, "dc.crt")),
             ("key_file", os.path.join(pki, "dc.key")),
+            # The browser origins this controller answers CORS for. The desktop page is served from seedmi's HTTPS
+            # origin; unless it is named here the controller returns no Access-Control-Allow-Origin and the browser
+            # discards its metadata, JWK Set and token responses -- so the OAuth flow fails in the browser even though
+            # curl against the same endpoints works. (seedmi-dc 1.6+. An older controller rejects this key outright at
+            # startup, which the version-floor warning below flags.)
+            ("origins", ["https://%s:%d" % (self.host, self.https_port)]),
         ])
         lines.append("")
         for gname, gparents in self.DC_GROUPS:
@@ -660,14 +680,28 @@ class Setup:
             lines.append("")
             # The client the MCP client (the desktop's mcpinspector app, or the external MCP Inspector) authenticates
             # as. client_credentials issues a token whose subject is the client itself (mcp-inspector@REALM); password
-            # issues one that acts as the named user (alice/bob), so the object ACLs for that user then apply. The
-            # audience is the CDMI server's base URI; seedmi also accepts a token carrying the MCP endpoint's URI.
+            # issues one that acts as the named user (alice/bob), so the object ACLs for that user then apply.
+            #
+            # BOTH resource identifiers of the one server are registered: the CDMI base URI and the MCP endpoint's own
+            # URI. seedmi accepts either (0.88: every resource identifier of this one server is an audience it answers
+            # to), but that is the resource server's side of it. The controller refuses a `resource` it has not
+            # registered for the client -- "the client may not ask a token for ..." (tokens.ts, invalid_target) -- so a
+            # client that correctly follows RFC 9728 to the endpoint's metadata and then asks under RFC 8707 for a token
+            # audienced at the MCP endpoint was refused. Registering the base URI alone only worked for a client that
+            # asked for no resource at all and took audiences[0] by default.
             lines.append("[[client]]")
             lines += toml_table([
                 ("id", self.oauth_client_id),
                 ("secret", self.oauth_client_secret),
                 ("grants", ["client_credentials", "password"]),
-                ("audiences", [self.base_uri]),
+                ("audiences", [self.base_uri, "https://%s:%d/mcp" % (self.host, self.mcp_port)]),
+                # The scopes the client may be issued. cvwm's mcpinspector asks for all three by default
+                # (apps/mcpinspector/index.js: `form.set('scope', 'cdmi:read cdmi:write cdmi:admin')`), and the
+                # controller refuses a scope a client is not registered for rather than dropping it quietly --
+                # "the client may not be issued the scope cdmi:read" (tokens.ts, invalid_scope). Registering no
+                # scopes therefore refused every request this app makes, even though the MCP endpoint requires
+                # none (scopes_required = false): the refusal is the authorization server's, not the endpoint's.
+                ("scopes", ["cdmi:read", "cdmi:write", "cdmi:admin"]),
             ])
             lines.append("")
         self._write(path, lines)
@@ -721,14 +755,14 @@ class Setup:
         lines += toml_table([("enabled", True), ("host", self.host), ("port", 2049)])
         lines.append("")
         lines.append("[smb]")
-        lines += toml_table([("enabled", True), ("host", self.host), ("port", 445)])
+        lines += toml_table([("enabled", False), ("host", self.host), ("port", 445)])
         lines.append("")
         lines.append("# Resolve the root domain's principals at the controller, and state where their homes are held.")
         lines.append("[[domain_controller]]")
         lines += toml_table([
             ("domain", "/cdmi_domains/"),
             ("realm", self.realm),
-            ("ldap", "ldaps://127.0.0.1:%d" % self.dc_ldap_port),
+            ("ldap", "ldaps://%s:%d" % (self.host, self.dc_ldap_port)),
             ("base", self.base_dn),
             ("ca_file", os.path.join(pki, "dc.crt")),
             ("home_base", self.base_uri),
@@ -752,7 +786,7 @@ class Setup:
             lines += toml_table([
                 ("domain", "/cdmi_domains/%s/" % sd["name"]),
                 ("realm", self.realm),
-                ("ldap", "ldaps://127.0.0.1:%d" % sd["ldap_port"]),
+                ("ldap", "ldaps://%s:%d" % (self.host, sd["ldap_port"])),
                 ("base", self.base_dn),
                 ("ca_file", os.path.join(pki, "dc.crt")),
                 ("home_base", self.base_uri),
@@ -1180,12 +1214,12 @@ class Setup:
         # three phases later. The most common causes are a missing entry in [listen] (e.g. no ldap_port) or a bad cert.
         time.sleep(0.5)
         self._alive("dc", dc)
-        OUT.note("waiting for the controller's LDAP port (127.0.0.1:%d) ..." % self.dc_ldap_port)
-        self._wait_port("dc", dc, "127.0.0.1", self.dc_ldap_port, "LDAP port")
-        OUT.note("waiting for the controller's HTTPS port (127.0.0.1:%d) ..." % self.dc_https_port)
-        self._wait_port("dc", dc, "127.0.0.1", self.dc_https_port, "HTTPS port")
+        OUT.note("waiting for the controller's LDAP port (%s:%d) ..." % (self.host, self.dc_ldap_port))
+        self._wait_port("dc", dc, self.host, self.dc_ldap_port, "LDAP port")
+        OUT.note("waiting for the controller's HTTPS port (%s:%d) ..." % (self.host, self.dc_https_port))
+        self._wait_port("dc", dc, self.host, self.dc_https_port, "HTTPS port")
         # The controller serves TLS on its HTTPS port with the certificate this script generated for it.
-        self._check_cert("controller", "127.0.0.1", self.dc_https_port, self.host, server_hostname=self.host)
+        self._check_cert("controller", self.host, self.dc_https_port, self.host, server_hostname=self.host)
         OUT.did("the root domain controller is running, its LDAP and HTTPS ports are open, and its certificate names `%s`" % self.host)
 
         # ---- the sub-domain controllers ----
@@ -1196,8 +1230,8 @@ class Setup:
             proc = self._start("dc-" + sd["name"], self.run, ["node", dc_main, "--config", os.path.join(self.run, "dc-%s.toml" % sd["name"])])
             time.sleep(0.3)
             self._alive("dc-" + sd["name"], proc)
-            OUT.note("waiting for the %s controller's LDAP port (127.0.0.1:%d) ..." % (sd["name"], sd["ldap_port"]))
-            self._wait_port("dc-" + sd["name"], proc, "127.0.0.1", sd["ldap_port"], "LDAP port")
+            OUT.note("waiting for the %s controller's LDAP port (%s:%d) ..." % (sd["name"], self.host, sd["ldap_port"]))
+            self._wait_port("dc-" + sd["name"], proc, self.host, sd["ldap_port"], "LDAP port")
         OUT.did("the sub-domain controllers are running (%s), each serving only its members" %
                 "; ".join("%s: %s" % (sd["name"], ", ".join(sd["members"])) for sd in self.subdomains))
 
@@ -1548,8 +1582,8 @@ class Setup:
         path = os.path.join(self.run, "start.sh")
         # The port a dependency must be up on before the named server is launched.
         waits = {
-            "seedmi": [("127.0.0.1", self.dc_ldap_port, "the domain controller's LDAP port"),
-                       ("127.0.0.1", self.dc_https_port, "the domain controller's HTTPS port")],
+            "seedmi": [(self.host, self.dc_ldap_port, "the domain controller's LDAP port"),
+                       (self.host, self.dc_https_port, "the domain controller's HTTPS port")],
             "dac":    [(self.host, self.https_port, "seedmi's binding")],
         }
         with open(path, "w", encoding="utf-8") as f:
@@ -1668,7 +1702,7 @@ class Setup:
         OUT.line("")
         OUT.line("Notes on the domain model:")
         OUT.line("- membership is scoped per sub-domain by giving each its OWN controller instance. The root controller")
-        OUT.line("  (LDAP 127.0.0.1:%d) serves all three principals; the orchestration controller (%d) serves only" % (self.dc_ldap_port, self.subdomains[0]["ldap_port"]))
+        OUT.line("  (LDAP %s:%d) serves all three principals; the orchestration controller (%d) serves only" % (self.host, self.dc_ldap_port, self.subdomains[0]["ldap_port"]))
         OUT.line("  mallory and the agents controller (%d) only bob. All share this realm and LDAP base, so a principal" % self.subdomains[1]["ldap_port"])
         OUT.line("  keeps one identity (bob@%s everywhere); a principal absent from a sub-domain's controller does not" % self.realm)
         OUT.line("  resolve there and so is NOT a principal of that domain -- mallory is not a member of agents, nor bob")

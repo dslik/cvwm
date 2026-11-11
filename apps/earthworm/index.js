@@ -18,8 +18,8 @@
   // built-in default. S() reads a string with optional {token} substitution; the stylesheet, the toolbar arrow icons
   // and the home page are pulled from the fork where present.
   var R = CTX.rsrc || null;
-  function S(id, fb, vars) {
-    var v = R && R.text('strings', id); if (v == null) v = fb;
+  function S(id, vars) {
+    var v = R && R.text('strings', id); if (v == null) return id;
     if (vars) for (var k in vars) v = v.split('{' + k + '}').join(vars[k]);
     return v;
   }
@@ -29,24 +29,7 @@
   var drifted = false;              // the frame has left stack[at] for an address we cannot read
 
   var style = document.createElement('style');
-  var DEFAULT_CSS =
-    'html,body{margin:0;height:100%}' +
-    'body{display:flex;flex-direction:column;background:#bfbfbf;color:#000;font:13px Helvetica,"Nimbus Sans","Liberation Sans",Arial,sans-serif}' +
-    '#bar{display:flex;align-items:center;gap:4px;padding:4px 6px;flex:none}' +
-    'button{min-width:30px;height:24px;padding:0 8px;display:inline-flex;align-items:center;justify-content:center;background:#bfbfbf;color:#000;font:700 12px inherit;font-family:inherit;border:2px solid;border-color:#fff #555 #555 #fff}' +
-    'button:active{border-color:#555 #fff #fff #555}button:disabled{color:#777}button:focus-visible{outline:1px solid #000;outline-offset:1px}' +
-    '#url{flex:1;min-width:0;height:24px;box-sizing:border-box;padding:0 6px;background:#fff;color:#000;font:13px "DejaVu Sans Mono",Menlo,Consolas,monospace;border:2px solid;border-color:#555 #fff #fff #555}' +
-    '#url:focus{outline:1px solid #000}' +
-    '#page{flex:1;min-height:0;width:100%;box-sizing:border-box;background:#fff;border:2px solid;border-color:#555 #fff #fff #555}' +
-    '#status{flex:none;padding:2px 8px;font-size:11px;line-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
-    '#wrap{flex:1;min-height:0;position:relative;display:flex}' +
-    '#page{flex:1}' +
-    '#notice{position:absolute;inset:2px;display:none;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:24px;box-sizing:border-box;background:#e8e8e8;color:#222;text-align:center;font:14px/1.5 Helvetica,"Nimbus Sans",Arial,sans-serif}' +
-    '#notice.on{display:flex}' +
-    '#notice h2{margin:0;font-size:16px}' +
-    '#notice p{margin:0;max-width:34em}' +
-    '#notice code{font-family:"DejaVu Sans Mono",Menlo,Consolas,monospace;background:#d3d3d3;padding:1px 4px;border-radius:2px;word-break:break-all}';
-  style.textContent = (R && R.text('styles', 'earthworm')) || DEFAULT_CSS;
+  style.textContent = R.text('styles', 'earthworm');
   document.head.appendChild(style);
 
   /* Drawn, not typed: the triangle characters come out as emoji, at emoji size, on some systems. */
@@ -58,12 +41,12 @@
   function icon(name, fallback) { var v = R && R.text('icons', name); return v == null ? fallback : v; }
 
   function el(tag, props, text) { var e = document.createElement(tag); for (var k in props) e.setAttribute(k, props[k]); if (text) e.textContent = text; return e; }
-  var back = el('button', { type: 'button', title: S('back', 'Back'), 'aria-label': S('back', 'Back') }); back.innerHTML = icon('back', arrow(true));
-  var fwd = el('button', { type: 'button', title: S('forward', 'Forward'), 'aria-label': S('forward', 'Forward') }); fwd.innerHTML = icon('forward', arrow(false));
-  var reload = el('button', { type: 'button', title: S('reload', 'Reload') }, S('reload', 'Reload'));
-  var home = el('button', { type: 'button', title: S('home', 'Home') }, S('home', 'Home'));
-  var url = el('input', { id: 'url', type: 'text', 'aria-label': S('location', 'Location'), spellcheck: 'false', autocomplete: 'off', placeholder: S('urlPlaceholder', 'Type a web address') });
-  var go = el('button', { type: 'button' }, S('go', 'Go'));
+  var back = el('button', { type: 'button', title: S('back'), 'aria-label': S('back') }); back.innerHTML = icon('back', arrow(true));
+  var fwd = el('button', { type: 'button', title: S('forward'), 'aria-label': S('forward') }); fwd.innerHTML = icon('forward', arrow(false));
+  var reload = el('button', { type: 'button', title: S('reload') }, S('reload'));
+  var home = el('button', { type: 'button', title: S('home') }, S('home'));
+  var url = el('input', { id: 'url', type: 'text', 'aria-label': S('location'), spellcheck: 'false', autocomplete: 'off', placeholder: S('urlPlaceholder') });
+  var go = el('button', { type: 'button' }, S('go'));
   var bar = el('div', { id: 'bar' }), page = el('iframe', { id: 'page', title: 'Page' }), status = el('div', { id: 'status', role: 'status' });
   var wrap = el('div', { id: 'wrap' }), notice = el('div', { id: 'notice' });
   [back, fwd, reload, home, url, go].forEach(function (n) { bar.appendChild(n); });
@@ -114,14 +97,14 @@
       page.removeAttribute('src'); page.srcdoc = '';   // blank the frame without a cross-origin load that could clear the notice
       status.textContent = '';
       var httpsForm = address.replace(/^http:/i, 'https:');
-      showNotice(S('httpTitle', 'This page can\u2019t be shown'), [
-        S('httpBody', 'Earthworm runs inside a secure (https) desktop, and a browser will not load an insecure (http) page inside it. This is a browser security rule, not a limit of Earthworm.'),
-        paragraphWithCode(S('httpTry', 'Try the secure address instead: '), httpsForm)
+      showNotice(S('httpTitle'), [
+        S('httpBody'),
+        paragraphWithCode(S('httpTry'), httpsForm)
       ]);
       buttons(); title(address);
       return;
     }
-    status.textContent = S('loading', 'Loading {a} \u2026', { a: address });
+    status.textContent = S('loading', { a: address });
     if (address === HOME) { page.removeAttribute('src'); page.srcdoc = HOME_PAGE; }
     else {
       page.removeAttribute('srcdoc'); page.src = address;
@@ -142,16 +125,16 @@
   }
   function framingRefused(address) {
     var host = ''; try { host = new URL(address).host; } catch (e) { host = address; }
-    showNotice(S('refusedTitle', 'This site can\u2019t be shown here'), [
-      paragraphWithCode('', host, S('refusedBody1', ' did not load in the frame. The usual cause is that the site forbids being displayed inside another page.')),
-      S('refusedBody2', 'Many sites refuse to be embedded, as a security measure. This is the site\u2019s choice, not a limit of Earthworm.')
+    showNotice(S('refusedTitle'), [
+      paragraphWithCode('', host, S('refusedBody1')),
+      S('refusedBody2')
     ]);
   }
-  var NAME = S('title', 'Earthworm');
+  var NAME = S('title');
   function title(address) { var host = ''; try { host = new URL(address).host; } catch (e) { /* about:home */ } if (CTX.setTitle) CTX.setTitle(NAME + (host ? ' \u2014 ' + host : '')); }
   function navigate(text) {
     var address = normalize(text);
-    if (/^javascript:/i.test(address)) { status.textContent = S('noJavascript', 'javascript: addresses are not opened.'); return; }
+    if (/^javascript:/i.test(address)) { status.textContent = S('noJavascript'); return; }
     stack = stack.slice(0, at + 1); stack.push(address); at = stack.length - 1; show(address);
   }
 
@@ -167,7 +150,7 @@
       if (href !== stack[at]) { stack = stack.slice(0, at + 1); stack.push(href); at = stack.length - 1; }
       url.value = href; drifted = false;
     } else if (stack[at] !== HOME && !noticeShown) {   // a link followed inside a page of another origin (not our own blanking behind a notice)
-      drifted = true; status.textContent = S('drifted', 'A link was followed inside the page; its address is not visible. Back returns to the address shown.');
+      drifted = true; status.textContent = S('drifted');
     }
     if (href && page.contentDocument && page.contentDocument.title && CTX.setTitle) CTX.setTitle(NAME + ' \u2014 ' + page.contentDocument.title);
     buttons();

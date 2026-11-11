@@ -23,8 +23,8 @@
   // built-in default. S() reads a string with optional {token} substitution; the stylesheet and the CDMI media-type
   // set are pulled from the fork where present.
   var R = CTX.rsrc || null;
-  function S(id, fb, vars) {
-    var v = R && R.text('strings', id); if (v == null) v = fb;
+  function S(id, vars) {
+    var v = R && R.text('strings', id); if (v == null) return id;
     if (vars) for (var k in vars) v = v.split('{' + k + '}').join(vars[k]);
     return v;
   }
@@ -32,101 +32,35 @@
   if (R) { var _ct = R.json('data', 'cdmitypes'); if (Array.isArray(_ct) && _ct.length) { CDMI_TYPES = {}; _ct.forEach(function (t) { CDMI_TYPES[t] = 1; }); } }
 
   var style = document.createElement('style');
-  var DEFAULT_CSS =
-    ':root{--fg:#1f2328;--muted:#59636e;--bg:#fff;--panel:#f6f8fa;--border:#d1d9e0;--code:#eff1f3;--accent:#0969da;--ok:#1a7f37;--err:#cf222e;--edge:#8c95a1;--node:#0969da;--node2:#6e7781;--focus:#bf3989;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;}' +
-    '@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--fg:#e6edf3;--muted:#9198a1;--bg:#0d1117;--panel:#151b23;--border:#3d444d;--code:#151b23;--accent:#4493f8;--ok:#3fb950;--err:#f85149;--edge:#556;--node:#4493f8;--node2:#7d8590;--focus:#db61a2;}}' +
-    'html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}' +
-    'body{display:flex;flex-direction:column;}' +
-    '#top{display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--border);flex:none;}' +
-    '#top input{flex:1 1 0;height:30px;box-sizing:border-box;min-width:0;font:12px var(--mono);padding:0 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);}' +
-    '#top button{height:30px;flex:none;padding:0 14px;border:1px solid var(--border);border-radius:6px;background:var(--code);color:var(--fg);cursor:pointer;font-size:12px;}' +
-    '#top button.go{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600;}' +
-    '#cols{flex:none;height:140px;display:flex;overflow-x:auto;overflow-y:hidden;border-bottom:1px solid var(--border);background:var(--panel);}' +
-    '#cols .col{flex:0 0 210px;min-width:210px;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--bg);}' +
-    '#cols .col:nth-child(even){background:var(--panel);}' +
-    '#cols .col-h{flex:none;padding:4px 9px;font:600 10px var(--mono);letter-spacing:.03em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
-    '#cols .col-b{flex:1;overflow-y:auto;padding:3px 0;}' +
-    '#cols .crow{display:flex;align-items:center;gap:6px;padding:3px 8px 3px 9px;cursor:pointer;font:12px var(--mono);color:var(--fg);border:0;background:none;width:100%;text-align:left;box-sizing:border-box;}' +
-    '#cols .crow:hover{background:var(--code);}' +
-    '#cols .crow.sel{background:var(--accent);color:#fff;}' +
-    '#cols .crow.sel .csub,#cols .crow.sel .ctag,#cols .crow.sel .cchev,#cols .crow.sel .ccnt{color:rgba(255,255,255,.85);}' +
-    '#cols .cnm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
-    '#cols .csub{color:var(--muted);font-size:10px;max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
-    '#cols .cchev{flex:none;color:var(--muted);}' +
-    '#cols .ccnt{flex:none;color:var(--muted);font-size:10px;}' +
-    '#cols .cdot{flex:none;width:8px;height:8px;border-radius:50%;}' +
-    '#cols .cdot.object{background:var(--node);}#cols .cdot.reference{background:#8250df;}#cols .cdot.literal{background:var(--node2);border-radius:2px;}#cols .cdot.external{background:#953800;}' +
-    '@media(prefers-color-scheme:dark){:root:not([data-theme="light"]) #cols .cdot.reference{background:#c297ff;}:root:not([data-theme="light"]) #cols .cdot.external{background:#db8f4a;}}' +
-    '#cols .ctag{flex:none;font-size:9px;padding:0 5px;border-radius:8px;background:var(--code);color:var(--muted);}' +
-    '#cols .cempty{color:var(--muted);font:11px var(--mono);padding:9px;}' +
-    '#cols .cdetail{padding:8px 9px;font:12px var(--mono);}' +
-    '#cols .cdetail .k{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.03em;margin-bottom:3px;}' +
-    '#cols .cdetail .v{word-break:break-word;white-space:pre-wrap;}' +
-    '#cols .cdetail .u{color:var(--muted);font-size:11px;word-break:break-all;margin-top:5px;}' +
-    '#resizer{flex:none;height:6px;cursor:row-resize;background:var(--panel);border-bottom:1px solid var(--border);}' +
-    '#resizer:hover{background:var(--border);}' +
-    '#top button:disabled{opacity:.6;cursor:default;}' +
-    '#main{flex:1;min-height:0;display:flex;}' +
-    '#canvas{flex:1;min-width:0;position:relative;overflow:hidden;background:var(--bg);}' +
-    '#canvas svg{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:grab;}' +
-    '#canvas svg.grabbing{cursor:grabbing;}' +
-    '.edge{stroke:var(--edge);stroke-width:1.5;}' +
-    '.edge-lbl{fill:var(--muted);font:10px var(--mono);pointer-events:none;}' +
-    '.node circle{stroke:var(--bg);stroke-width:2;cursor:pointer;}' +
-    '.node.cdmi circle{fill:var(--node);}' +
-    '.node.external circle{fill:var(--node2);}' +
-    '.node.focus circle{fill:var(--focus);}' +
-    '.node.sel circle{stroke:var(--fg);stroke-width:3;}' +
-    '.node text{fill:var(--fg);font:11px var(--mono);text-anchor:middle;pointer-events:none;paint-order:stroke;stroke:var(--bg);stroke-width:3px;}' +
-    '.node .plus{fill:#fff;font:700 12px var(--mono);text-anchor:middle;stroke:none;pointer-events:none;}' +
-    '#side{flex:0 0 268px;border-left:1px solid var(--border);overflow:auto;padding:12px;box-sizing:border-box;}' +
-    '#side h3{margin:0 0 2px;font:600 13px var(--mono);word-break:break-all;}' +
-    '#side .u{color:var(--muted);font:11px var(--mono);word-break:break-all;margin:0 0 10px;}' +
-    '#side .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:10px;background:var(--code);color:var(--muted);margin:0 4px 8px 0;}' +
-    '#side .tag.cdmi{color:var(--ok);}#side .tag.external{color:var(--muted);}' +
-    '#side .lbl{color:var(--muted);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;margin:12px 0 4px;}' +
-    '#side table{width:100%;border-collapse:collapse;font:11px var(--mono);}' +
-    '#side td{border-top:1px solid var(--border);padding:3px 4px;vertical-align:top;word-break:break-all;}' +
-    '#side td.p{color:var(--accent);max-width:60%;}' +
-    '#side .field{margin:0 0 8px;}' +
-    '#side .field label{display:block;font-size:11px;color:var(--muted);margin:0 0 2px;}' +
-    '#side .field input{width:100%;box-sizing:border-box;font:12px var(--mono);padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);}' +
-    '#side button{width:100%;height:30px;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer;margin-top:4px;}' +
-    '#side button.sec{background:var(--code);color:var(--fg);border-color:var(--border);font-weight:500;margin-top:6px;}' +
-    '#side button:disabled{opacity:.55;cursor:default;}' +
-    '#side .note{color:var(--muted);font-size:11px;margin-top:6px;}' +
-    '#side .err{color:var(--err);font-size:11px;margin-top:6px;word-break:break-word;}' +
-    '#side select{width:100%;box-sizing:border-box;font:12px var(--mono);padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);}' +
-    '#side td.act{white-space:nowrap;text-align:right;width:1%;}' +
-    '#side .rowbtn{border:1px solid var(--border);background:var(--code);color:var(--muted);border-radius:5px;cursor:pointer;font:10px var(--mono);padding:1px 5px;margin-left:3px;width:auto;height:auto;}' +
-    '#side .rowbtn:hover{color:var(--fg);}' +
-    '#status{flex:none;padding:5px 10px;font:12px var(--mono);border-top:1px solid var(--border);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
-    '#status .ok{color:var(--ok);}#status .err{color:var(--err);}' +
-    '.msg{color:var(--muted);padding:20px 4px;text-align:center;font-size:12px;}';
-  style.textContent = (R && R.text('styles', 'relationships')) || DEFAULT_CSS;
+  style.textContent = R.text('styles', 'relationships');
   document.head.appendChild(style);
   var SVGNS = 'http://www.w3.org/2000/svg';
   function el(t, p, k) { var e = document.createElement(t); attr(e, p); (k || []).forEach(function (c) { if (c) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); }); return e; }
   function sv(t, p, k) { var e = document.createElementNS(SVGNS, t); attr(e, p); (k || []).forEach(function (c) { if (c) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); }); return e; }
   function attr(e, p) { for (var x in (p || {})) { if (x === 'text') e.textContent = p[x]; else if (x === 'html') e.innerHTML = p[x]; else if (p[x] != null) e.setAttribute(x, p[x]); } }
 
-  var urlIn = el('input', { type: 'text', spellcheck: 'false', placeholder: S('urlPlaceholder', 'https://host:port/cdmi/3.0.0/path  ·  or /path/ on this server') });
-  var loadBtn = el('button', { class: 'go', type: 'button', text: S('load', 'Load') });
-  var fitBtn = el('button', { type: 'button', text: S('fit', 'Fit') });
+  var urlIn = el('input', { type: 'text', spellcheck: 'false', placeholder: S('urlPlaceholder') });
+  var loadBtn = el('button', { class: 'go', type: 'button', text: S('load') });
+  var fitBtn = el('button', { type: 'button', text: S('fit') });
   var top = el('div', { id: 'top' }, [urlIn, loadBtn, fitBtn]);
   var svg = document.createElementNS(SVGNS, 'svg');
   var viewG = sv('g');
   var edgesG = sv('g'); var nodesG = sv('g');
   viewG.appendChild(edgesG); viewG.appendChild(nodesG); svg.appendChild(viewG);
   var canvas = el('div', { id: 'canvas' }); canvas.appendChild(svg);
-  var side = el('div', { id: 'side' }, [el('div', { class: 'msg', text: S('sideIntro', 'Load an object to see its rel graph, then click a linked node to expand it.') })]);
+  var side = el('div', { id: 'side' }, [el('div', { class: 'msg', text: S('sideIntro') })]);
   var main = el('div', { id: 'main' }, [canvas, side]);
-  var status = el('div', { id: 'status', text: S('ready', 'Ready.') });
+  var status = el('div', { id: 'status', text: S('ready') });
   var colsEl = el('div', { id: 'cols' });                     // the Miller-columns browser, between the URL bar and the graph
   var resizer = el('div', { id: 'resizer', title: 'Drag to resize the columns' });
   document.body.appendChild(top); document.body.appendChild(colsEl); document.body.appendChild(resizer); document.body.appendChild(main); document.body.appendChild(status);
+  // One light/dark setting serves the whole desktop: the shared cvwm.dark key in localStorage, which the desktop
+  // toggles (View > Dark mode) and every app follows by mirroring it onto body.dark.
+  function setDark(on) { document.body.classList.toggle('dark', !!on); }
+  try { setDark(localStorage.getItem('cvwm.dark') === 'on'); } catch (e) { /* no storage */ }
+  window.addEventListener('storage', function (ev) { if (ev.key === 'cvwm.dark') setDark(ev.newValue === 'on'); });
   if (CTX.resize) CTX.resize(940, 640);
-  if (CTX.setTitle) CTX.setTitle(S('title', 'relationships'));
+  if (CTX.setTitle) CTX.setTitle(S('title'));
 
   urlIn.value = CTX.startURI || CTX.containerURI || CTX.baseURI || (HOME + '/cdmi/3.0.0/');
 
@@ -247,20 +181,20 @@
     if (editing && (!node || editing.subject !== node.uri)) editing = null;   // an edit belongs to the node it began on
     [].forEach.call(nodesG.children, function (g) { g.classList.toggle('sel', g._node === node); });
     side.textContent = '';
-    if (!node) { side.appendChild(el('div', { class: 'msg', text: S('clickNode', 'Click a node to see it.') })); return; }
+    if (!node) { side.appendChild(el('div', { class: 'msg', text: S('clickNode') })); return; }
     side.appendChild(el('h3', { text: node.label }));
     side.appendChild(el('div', { class: 'u', text: node.uri }));
-    side.appendChild(el('span', { class: 'tag ' + node.kind, text: node.kind === 'external' ? S('otherOrigin', 'other origin') : (node.objectType ? node.objectType.replace('application/cdmi-', 'cdmi ') : S('thisServer', 'this server')) }));
+    side.appendChild(el('span', { class: 'tag ' + node.kind, text: node.kind === 'external' ? S('otherOrigin') : (node.objectType ? node.objectType.replace('application/cdmi-', 'cdmi ') : S('thisServer')) }));
     if (node.error) side.appendChild(el('div', { class: 'err', text: node.error }));
 
     // expand affordance
     if (node.kind !== 'external') {
-      var exp = el('button', { class: 'sec', type: 'button', text: node.expanded ? S('reloadLinks', 'Reload links') : S('expandLinks', 'Expand links') });
+      var exp = el('button', { class: 'sec', type: 'button', text: node.expanded ? S('reloadLinks') : S('expandLinks') });
       exp.disabled = !!node.loading;
       exp.addEventListener('click', function () { node.expanded = false; expand(node); });
       side.appendChild(exp);
     } else {
-      side.appendChild(el('div', { class: 'note', text: S('externalNote', 'This object is at another origin, so its links cannot be read from here.') }));
+      side.appendChild(el('div', { class: 'note', text: S('externalNote') }));
     }
 
     var editable = node.kind !== 'external';
@@ -311,34 +245,34 @@
     }
 
     // add / edit form (only for a writable object of this server)
-    if (!editable) { side.appendChild(el('div', { class: 'lbl', text: S('addLinkLabel', 'add a link') })); side.appendChild(el('div', { class: 'note', text: S('addOnlyHere', 'Links can be added only to an object this server holds.') })); return; }
-    side.appendChild(el('div', { class: 'lbl', text: editing ? (editing.type === 'literal' ? S('editProperty', 'edit property') : S('editLink', 'edit link')) : S('addLinkOrProp', 'add a link or property') }));
+    if (!editable) { side.appendChild(el('div', { class: 'lbl', text: S('addLinkLabel') })); side.appendChild(el('div', { class: 'note', text: S('addOnlyHere') })); return; }
+    side.appendChild(el('div', { class: 'lbl', text: editing ? (editing.type === 'literal' ? S('editProperty') : S('editLink')) : S('addLinkOrProp') }));
     var dlId = 'rv-targets';
     var dl = el('datalist', { id: dlId }, Object.keys(nodes).filter(function (u) { return u !== node.uri; }).map(function (u) { return el('option', { value: u }); }));
-    var typeSel = el('select', {}, [el('option', { value: 'uri', text: S('typeLink', 'Link (to an object)') }), el('option', { value: 'literal', text: S('typeLiteral', 'Literal (property value)') })]);
+    var typeSel = el('select', {}, [el('option', { value: 'uri', text: S('typeLink') }), el('option', { value: 'literal', text: S('typeLiteral') })]);
     typeSel.value = editing ? editing.type : 'uri';
     var predIn = el('input', { type: 'text', spellcheck: 'false', value: editing ? editing.pred : 'references' });
     var valIn = el('input', { type: 'text', spellcheck: 'false', list: dlId, value: editing ? editing.rawValue : '' });
-    var dtIn = el('input', { type: 'text', spellcheck: 'false', placeholder: S('datatypePlaceholder', 'datatype, or @lang'), value: (editing && editing.type === 'literal') ? (editing.lang ? '@' + editing.lang : (editing.datatype || '')) : '' });
+    var dtIn = el('input', { type: 'text', spellcheck: 'false', placeholder: S('datatypePlaceholder'), value: (editing && editing.type === 'literal') ? (editing.lang ? '@' + editing.lang : (editing.datatype || '')) : '' });
     var valLabel = el('label', {});
     var valField = el('div', { class: 'field' }, [valLabel, valIn, dl]);
-    var dtField = el('div', { class: 'field' }, [el('label', { text: S('datatypeLabel', 'datatype / @lang (optional)') }), dtIn]);
+    var dtField = el('div', { class: 'field' }, [el('label', { text: S('datatypeLabel') }), dtIn]);
     var errEl = el('div', { class: 'err' });
-    var primary = el('button', { type: 'button', text: editing ? S('saveChanges', 'Save changes') : S('add', 'Add') });
+    var primary = el('button', { type: 'button', text: editing ? S('saveChanges') : S('add') });
     function syncType() {
       var lit = typeSel.value === 'literal';
-      valLabel.textContent = lit ? S('fieldValue', 'value') : S('fieldTarget', 'target');
-      valIn.placeholder = lit ? S('valuePlaceholderLiteral', 'a text value') : S('valuePlaceholderUri', 'object URL, /path/, or #/value');
+      valLabel.textContent = lit ? S('fieldValue') : S('fieldTarget');
+      valIn.placeholder = lit ? S('valuePlaceholderLiteral') : S('valuePlaceholderUri');
       dtField.style.display = lit ? '' : 'none';
     }
     typeSel.addEventListener('change', syncType);
     primary.addEventListener('click', function () { doSave(node, editing, typeSel.value, predIn.value.trim(), valIn.value.trim(), dtIn.value.trim(), errEl, primary); });
-    side.appendChild(el('div', { class: 'field' }, [el('label', { text: S('fieldType', 'type') }), typeSel]));
-    side.appendChild(el('div', { class: 'field' }, [el('label', { text: S('fieldPredicate', 'predicate') }), predIn]));
+    side.appendChild(el('div', { class: 'field' }, [el('label', { text: S('fieldType') }), typeSel]));
+    side.appendChild(el('div', { class: 'field' }, [el('label', { text: S('fieldPredicate') }), predIn]));
     side.appendChild(valField);
     side.appendChild(dtField);
     side.appendChild(primary);
-    if (editing) { var cancelBtn = el('button', { class: 'sec', type: 'button', text: S('cancel', 'Cancel') }); cancelBtn.addEventListener('click', function () { editing = null; select(node); }); side.appendChild(cancelBtn); }
+    if (editing) { var cancelBtn = el('button', { class: 'sec', type: 'button', text: S('cancel') }); cancelBtn.addEventListener('click', function () { editing = null; select(node); }); side.appendChild(cancelBtn); }
     side.appendChild(errEl);
     syncType();
   }
@@ -469,7 +403,7 @@
   function renderCols() {
     if (!colsEl) return;
     colsEl.textContent = '';
-    if (!colRoot) { colsEl.appendChild(ccol('columns', cbody(S('colsEmpty', 'Load an object to browse its relations.')))); return; }
+    if (!colRoot) { colsEl.appendChild(ccol('columns', cbody(S('colsEmpty')))); return; }
     // column 1: the root object
     var rootBody = cbody();
     rootBody.appendChild(crow({ name: labelOf(colRoot), dot: 'object', tag: 'root', sel: true, chev: true, title: colRoot, onClick: function () { pickGraph(colRoot); } }));
@@ -479,11 +413,11 @@
     var obj = colRoot, i = 0;
     while (true) {
       var preds = colPreds(obj);
-      if (preds === undefined) { colsEl.appendChild(ccol('relations · ' + labelOf(obj), cbody(S('colsReading', 'Reading …')))); colFetch(obj).then(renderCols); break; }
+      if (preds === undefined) { colsEl.appendChild(ccol('relations · ' + labelOf(obj), cbody(S('colsReading')))); colFetch(obj).then(renderCols); break; }
       if (preds === null) { colsEl.appendChild(ccol('relations · ' + labelOf(obj), cbody((colReps[obj] && colReps[obj].error) || 'Could not read.'))); break; }
       var selPred = colChain[i];
       (function (idx, object, plist) {
-        var body = cbody(plist.length ? null : S('colsNoRelations', 'No relations.'));
+        var body = cbody(plist.length ? null : S('colsNoRelations'));
         plist.forEach(function (p) { body.appendChild(crow({ name: p.pred, cnt: p.entries.length, chev: true, sel: p.pred === colChain[idx], onClick: function () { colChain = colChain.slice(0, idx); colChain[idx] = p.pred; renderCols(); } })); });
         colsEl.appendChild(ccol('relations · ' + labelOf(object), body));
       })(i, obj, preds);
@@ -491,7 +425,7 @@
       var entries = (preds.filter(function (p) { return p.pred === selPred; })[0] || { entries: [] }).entries;
       var selRaw = colChain[i + 1];
       (function (idx, object, pred, ents) {
-        var body = cbody(ents.length ? null : S('colsNoDestinations', 'No destinations.'));
+        var body = cbody(ents.length ? null : S('colsNoDestinations'));
         ents.forEach(function (entry) {
           var d = classifyDest(entry, object);
           var sub = (d.type !== 'literal' && d.raw !== d.value) ? d.raw : '';     // show a stored relative reference
@@ -504,7 +438,7 @@
       var chosen = null; for (var k = 0; k < entries.length; k++) { var dd = classifyDest(entries[k], obj); if (dd.raw === selRaw) { chosen = dd; break; } }
       if (!chosen) break;
       if (chosen.type === 'object') {
-        if (!(chosen.target in colReps)) { colsEl.appendChild(ccol('relations · ' + labelOf(chosen.target), cbody(S('colsReading', 'Reading …')))); colFetch(chosen.target).then(renderCols); break; }
+        if (!(chosen.target in colReps)) { colsEl.appendChild(ccol('relations · ' + labelOf(chosen.target), cbody(S('colsReading')))); colFetch(chosen.target).then(renderCols); break; }
         obj = chosen.target; i += 2; continue;
       }
       // literal / reference / external: a leaf detail column

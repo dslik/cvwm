@@ -17,5 +17,6 @@
   "run-in": "Run in",
   "code-placeholder": "JavaScript to run in that window; Enter runs it, Up and Down recall",
   "empty-filtered": "Nothing to show with these filters.",
-  "need-cvwm": "This program needs cvwm: open it from a desktop window."
+  "need-cvwm": "This program needs cvwm: open it from a desktop window.",
+  "copied": "Copied"
 }

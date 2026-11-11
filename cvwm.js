@@ -1,6 +1,6 @@
 /*!
  * cvwm - the CDMI Virtual Window Manager: an X11 / FVWM style desktop for CDMI 3 servers, in one plain JavaScript file.
- * cvwm version: 2.110.0
+ * cvwm version: 2.142.0
  *
  *   <!doctype html><meta charset="utf-8"><title>cvwm</title><script src="cvwm.js"></script>
  *
@@ -49,7 +49,7 @@
     panelsDir: 'control_panels/',   // control panels: imported into the home like apps (see provisionHomePanels)
     fontsDir: 'fonts/',             // fonts: a server-wide /fonts/ imported into the home like apps (see provisionHomeFonts)
     procDir: 'proc/',               // runtime state in the home (e.g. ~/proc/screens/)
-    prefsDir: 'prefs/',             // user preferences as JSON (~/prefs/locale.json, ~/prefs/apps.json)
+    prefsDir: 'prefs/',             // user preferences as JSON (~/prefs/locale.json, ~/prefs/apps.json, ~/prefs/cvwm.json)
     screensDir: 'screens/',         // one container per live browser window, numbered 1,2,... (~/proc/screens/<n>)
     builtinApps: ['apps/mdviewer/', 'apps/fontviewer/', 'apps/textile/', 'apps/earthworm/'],   // seeded into ~/prefs/apps.json on first run
     binDir: 'bin/',
@@ -75,8 +75,14 @@
   /* A value is returned only where a read selects it, so reading an object's value names these fields. */
   var VALUE_FIELDS = '?objectType&objectName&objectID&mimetype&metadata&valuetransferencoding&valuerange&value';
   var MOUNTS_KEY = 'cvwm.mounts', VIEW_KEY = 'cvwm.view';
-  var VERSION = '2.110.0';                 // the running build; a change purges cvwm's saved state (see below)
+  var VERSION = '2.142.0';                 // the running build; a change purges cvwm's saved state (see below)
   var VERSION_KEY = 'cvwm.version';
+  // The oldest cvwm version an application may declare (in rsrc/manifest.json "builtAgainst") and still run here. An
+  // app built against an older cvwm, or one that declares nothing at all, is refused with "a newer version of the
+  // application is needed"; one built against a newer cvwm is refused with "a newer version of cvwm is needed". Raise
+  // this only on a release that breaks the application contract in a way older apps cannot be shimmed through -- then
+  // un-rebuilt apps are told to update, instead of running and failing in confusing ways. See docs/app-compatibility.md.
+  var MIN_APP_VERSION = '2.127.0';
 
   /* Saved state is namespaced under "cvwm." in localStorage: mounts, the icon/list view choice, known hosts and
      network-access consent. A new build may change the meaning or shape of any of it -- most visibly the mounts,
@@ -762,8 +768,15 @@
     '.fv-tb:active{border-color:var(--dk) var(--lt) var(--lt) var(--dk)}',
     '.fv-tb i{display:block;border:1px solid;border-color:var(--lt) var(--dk) var(--dk) var(--lt)}',
     '.fv-tb.m i{width:10px;height:3px}.fv-tb.i i{width:4px;height:4px}.fv-tb.x i{width:12px;height:12px}',
-    '.fv-tt{flex:1;min-width:0;font-weight:700;line-height:18px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;',
-    'padding:0 6px;cursor:move;border:2px solid;border-color:var(--lt) var(--dk) var(--dk) var(--lt)}',
+    /* one title panel for the whole bar (a normal window has only the centered title in it); a Run-as window adds the
+       identity on the right of that same panel, with no separator, and the title then centres in the space that is left */
+    '.fv-tt{flex:1;min-width:0;display:flex;align-items:center;cursor:move;border:2px solid;border-color:var(--lt) var(--dk) var(--dk) var(--lt)}',
+    '.fv-ttl{flex:1;min-width:0;font-weight:700;line-height:18px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 6px}',
+    '.fv-id{display:none;flex:none;max-width:42%;min-width:0;font-weight:700;line-height:18px;padding:0 8px 0 2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+    '.fv-win.fv-runas .fv-id{display:block}',
+    /* a Run-as window whose principal is an administrator: a red hazard bar (the platinum --hi with a nearby lighter red) and legible black text */
+    '.fv-win.fv-admin .fv-title{background:repeating-linear-gradient(135deg,var(--hi) 0 9px,#d0808f 9px 18px)}',
+    '.fv-win.fv-admin .fv-tt{color:#000;text-shadow:0 1px 0 rgba(255,255,255,.5)}',
     '.fv-client{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;background:var(--grey);overflow:hidden}',
     '.fv-drop{position:absolute;inset:5px;z-index:5;display:none;pointer-events:none;border:3px solid #1f5fd0;background:rgba(31,95,208,.14);align-items:flex-end;justify-content:center}',
     '.fv-drop span{margin-bottom:10px;padding:2px 8px;background:#1f5fd0;color:#fff;font:700 12px var(--sans);max-width:90%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
@@ -789,6 +802,15 @@
     '.fv-fixed .fv-rs{display:none}.fv-fixed .fv-tb.x{display:none}',
     '.fv-fixh .fv-rs.n,.fv-fixh .fv-rs.s,.fv-fixh .fv-rs.nw,.fv-fixh .fv-rs.ne,.fv-fixh .fv-rs.sw,.fv-fixh .fv-rs.se{display:none}.fv-fixh .fv-tb.x{display:none}',
     '.fv-shield{position:absolute;inset:0;z-index:100000;display:none}',
+    /* drag-to-edge snap preview: a translucent highlight of the region a dragged window will snap to */
+    '.fv-snap{position:absolute;z-index:99999;box-sizing:border-box;display:none;pointer-events:none;background:rgba(31,95,208,.20);border:3px solid #1f5fd0;',
+    'transition:left .09s ease-out,top .09s ease-out,width .09s ease-out,height .09s ease-out}',
+    '@media (prefers-reduced-motion:reduce){.fv-snap{transition:none}}',
+    /* standard About box: icon at the left, name / version / description at the right */
+    '.fv-about{display:flex;gap:16px;align-items:flex-start;margin-bottom:6px}',
+    '.fv-about-icon{flex:none;width:48px;height:48px}.fv-about-icon svg,.fv-about-icon img{width:48px;height:48px;display:block;object-fit:contain}',
+    '.fv-about-text{min-width:0}.fv-about-text h3{margin:0 0 1px;font-size:18px;font-weight:700}',
+    '.fv-about-text .ver{margin:0 0 8px;color:var(--dim);font-weight:700}.fv-about-text p{margin:0;line-height:1.4}',
     /* capture: the region-select overlay */
     '.fv-capsel{position:fixed;inset:0;z-index:100001;cursor:crosshair;background:rgba(0,0,0,.12)}',
     '.fv-capbox{position:fixed;display:none;border:1px dashed #fff;outline:1px solid #000;background:rgba(96,160,192,.18);pointer-events:none}',
@@ -904,6 +926,11 @@
     'border:2px solid;border-color:var(--dk) var(--lt) var(--lt) var(--dk)}',
     '.fv-item{display:flex;flex-direction:column;align-items:center;gap:2px;padding:2px;min-width:0;cursor:default}',
     '.fv-item span{font:11px/14px var(--mono);padding:0 3px;max-width:100%;overflow-wrap:anywhere;text-align:center}',
+    /* Icon mode: the label box is always two lines tall, so a long name never makes its cell taller than the rest and
+       shifts the grid -- but the name inside sizes to its own content, so the black selection is one line tall for a
+       one-line name and two for a wrapped one. The name hard-wraps (overflow-wrap) and clamps to two lines + ellipsis. */
+    '.fv-grid:not(.as-list) .fv-label{height:28px;display:flex;align-items:flex-start;justify-content:center;max-width:100%;min-width:0;overflow:hidden}',
+    '.fv-grid:not(.as-list) .fv-name{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;overflow-wrap:anywhere;word-break:break-word;line-height:14px;max-width:100%;min-width:0;text-align:center}',
     '.fv-item.sys svg{opacity:.55}.fv-item.sel .fv-name,.fv-item:focus-visible .fv-name{background:#000;color:#fff}.fv-item:focus{outline:none}',
     '.fv-pic{position:relative;display:flex}',
     '.fv-badge{position:absolute;right:-1px;bottom:-1px;width:13px;height:13px;border-radius:50%;color:#fff;font:700 11px/1 var(--sans);display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1px var(--std);pointer-events:none}',
@@ -993,7 +1020,8 @@
     opts = opts || {};
     requireTLS(url);
     var headers = { Accept: accept };
-    if (CD.auth && (sameOrigin(url) || vouchedOrigins[originOf(url)])) headers.Authorization = CD.auth;
+    var _auth = opts.auth || CD.auth;                         // a caller may run a request as another principal (opts.auth); default is the signed-in session
+    if (_auth && (sameOrigin(url) || vouchedOrigins[originOf(url)])) headers.Authorization = _auth;
     var res = checkLanding(await CD.fetch(url, { method: 'GET', headers: headers, redirect: 'follow', credentials: 'same-origin', cache: 'no-store', fvQuiet: !!(opts.quiet || opts.probe) }), url);      // an expected miss is filed under Debug in the log
     if (res.status === 401 && !opts.quiet && !opts.retried) {
       if (!signInPending) signInPending = signInDialog('The server asked for authentication.').finally(function () { signInPending = null; });
@@ -1012,26 +1040,40 @@
     return out;
   }
 
-  async function send(method, url, type, body, extra, retried) {
+  async function send(method, url, type, body, extra, retried, auth) {
     requireTLS(url);
     var headers = Object.assign({ 'Content-Type': type, Accept: type }, extra || {});
-    if (CD.auth && (sameOrigin(url) || vouchedOrigins[originOf(url)])) headers.Authorization = CD.auth;
+    var _auth = auth || CD.auth;                              // a caller may write as another principal (auth); default is the signed-in session
+    if (_auth && (sameOrigin(url) || vouchedOrigins[originOf(url)])) headers.Authorization = _auth;
     var res = checkLanding(await CD.fetch(url, { method: method, headers: headers, body: body, redirect: 'follow', credentials: 'same-origin' }), url);
     if (res.status === 401 && !retried) {
       if (!signInPending) signInPending = signInDialog('The server asked for authentication.').finally(function () { signInPending = null; });
-      if (await signInPending) return send(method, url, type, body, extra, true);
+      if (await signInPending) return send(method, url, type, body, extra, true, auth);
     }
     return res;
   }
 
   function bytesB64(bytes) { var s = ''; for (var i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(s); }
 
+  // A dropped File carries its own media type in file.type, but the browser leaves that empty for some kinds -- SVG
+  // most notably (on several platforms a .svg drops with no type), and often the plain text/code kinds too. When it is
+  // empty we fall back to the name's extension; anything not listed stays application/octet-stream and is stored as bytes.
+  var EXT_MIME = {
+    svg: 'image/svg+xml', svgz: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+    gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', tif: 'image/tiff', tiff: 'image/tiff',
+    txt: 'text/plain', text: 'text/plain', md: 'text/markdown', markdown: 'text/markdown', log: 'text/plain',
+    html: 'text/html', htm: 'text/html', css: 'text/css', csv: 'text/csv', tsv: 'text/tab-separated-values',
+    js: 'text/javascript', mjs: 'text/javascript', json: 'application/json', xml: 'application/xml',
+    yaml: 'application/yaml', yml: 'application/yaml', toml: 'application/toml', pdf: 'application/pdf'
+  };
+  function mimeFromName(name) { var s = String(name), i = s.lastIndexOf('.'); return i > 0 ? (EXT_MIME[s.slice(i + 1).toLowerCase()] || '') : ''; }
+
   /* Create a data object from a File. The value travels inside the representation: as a UTF-8 string
      where the file is text, as base64 otherwise. If-None-Match: * makes the server refuse (412) rather
      than replace an object of the same name. Returns 'created', 'replaced' or 'exists'. */
   async function uploadInto(containerURL, file, name, replace) {
     name = String(name).replace(/[\/?]/g, '_'); var bytes = new Uint8Array(await file.arrayBuffer());     // "/" and "?" are reserved in object names
-    var mime = file.type || 'application/octet-stream', rep = { mimetype: mime, metadata: {} }, text = null;
+    var mime = file.type || mimeFromName(name) || 'application/octet-stream', rep = { mimetype: mime, metadata: {} }, text = null;
     if (isTextual(mime)) { try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch (e) { text = null; } }
     if (text !== null) { rep.valuetransferencoding = 'utf-8'; rep.value = text; } else { rep.valuetransferencoding = 'base64'; rep.value = bytesB64(bytes); }
     var res = await send('PUT', containerURL + enc(name), T_OBJECT, JSON.stringify(rep), replace ? {} : { 'If-None-Match': '*' });
@@ -1187,10 +1229,11 @@
   function acceptDrops(el, url, progress) {
     function over(ev) {
       var files = hasFiles(ev), inner = isInternal(ev); if (!files && !inner) return;
-      var to = url(), ok = !!to && (files || canDrop(dragging, to, wantsCopy(ev)));
+      var copy = wantsCopy(ev), to = url(), ok = !!to && (files || canDrop(dragging, to, copy));
       ev.preventDefault(); ev.stopPropagation(); ev.fvSeen = true;
-      ev.dataTransfer.dropEffect = !ok ? 'none' : files || wantsCopy(ev) ? 'copy' : 'move';
+      ev.dataTransfer.dropEffect = !ok ? 'none' : files || copy ? 'copy' : 'move';
       el.classList.toggle('fv-into', ok);
+      if (progress) progress(!ok ? '' : (files ? 'Upload into ' : copy ? 'Copy into ' : 'Move into ') + (dragging && dragging.name ? dragging.name.replace(/[\/?]$/, '') : 'here'));   // keep the verb in step with the copy modifier
       WM.wins.forEach(function (w) { w.el.classList.remove('fv-over'); });
     }
     el.addEventListener('dragenter', over); el.addEventListener('dragover', over);
@@ -1305,23 +1348,23 @@
      detailed: also ask for each child's media type and metadata (size, time of modification), for the list view. */
   function refused(e) { return e instanceof CdmiError && (e.status === 400 || e.status === 501); }
 
-  async function listContainer(url, baseKey, detailed) {
+  async function listContainer(url, baseKey, detailed, auth) {
     var page = CFG.pageSize, head = '?objectType&objectName&objectID&parentURI&capabilitiesURI&metadata&exports&imports&childrenrange&children=0-';
     if (CD.listMode[baseKey] !== 'plain') {
       try {
         var names = ['objectType', 'objectName', 'children'].concat(detailed ? ['mimetype', 'metadata'] : []), fields = '&childfields=' + names.join(';');
-        var first = await getRep(url + head + (page - 1) + fields, ACCEPT_DIR, { probe: true });
+        var first = await getRep(url + head + (page - 1) + fields, ACCEPT_DIR, { probe: true, auth: auth });
         var got = (first.rep.children || []).length, from = got, truncated = false, kids = normChildren(first.rep.children, names);
         while (got === page) {
           if (kids.length >= CFG.maxChildren) { truncated = true; break; }
-          var more = await getRep(url + '?childrenrange&children=' + from + '-' + (from + page - 1) + fields, ACCEPT_DIR);
+          var more = await getRep(url + '?childrenrange&children=' + from + '-' + (from + page - 1) + fields, ACCEPT_DIR, { auth: auth });
           got = (more.rep.children || []).length; kids = kids.concat(normChildren(more.rep.children, names)); from += got;
         }
         if (kids.length > page) first.rep.childrenrange = '0-' + (kids.length - 1);       // the range of everything we gathered
         return { url: first.url, rep: first.rep, children: kids, truncated: truncated, detailed: !!detailed };
       } catch (e) { if (!refused(e)) throw e; if (e.status === 400) CD.listMode[baseKey] = 'plain'; }
     }
-    var plain = await getRep(url, ACCEPT_DIR);
+    var plain = await getRep(url, ACCEPT_DIR, { auth: auth });
     return { url: plain.url, rep: plain.rep, children: normChildren(plain.rep.children, null), truncated: false, detailed: false };
   }
 
@@ -1398,7 +1441,7 @@
 
   /* ------------------------------------------------------------------ window manager */
 
-  var root, view, shield, disksEl, iconsEl, pagerEl;
+  var root, view, shield, disksEl, iconsEl, pagerEl, snapPreviewEl, resizeDesktop = null;
   var WM = { wins: [], focused: null, z: 10, desk: [0, 0], cascade: 0 };
   var winUid = 0;                 // a stable id per window (every Win, not only app iframes), for the capture app
 
@@ -1420,6 +1463,36 @@
     window.addEventListener('pointercancel', up, true);
   }
 
+  /* Drag-to-edge snapping. While a resizable window is dragged, a pointer near an edge or corner of the screen marks a
+     region: top/bottom/left/right edges snap to that half, the four corners to that quarter. The region is in the
+     current desk's viewport coordinates (which is what a window's x/y use), so it maps straight onto the window. */
+  function snapZone(x, y) {
+    var W = vw(), H = vh(), EDGE = 18, CORNER = 140;
+    if (y <= EDGE) return x <= CORNER ? 'tl' : x >= W - CORNER ? 'tr' : 'top';
+    if (y >= H - EDGE) return x <= CORNER ? 'bl' : x >= W - CORNER ? 'br' : 'bottom';
+    if (x <= EDGE) return 'left';
+    if (x >= W - EDGE) return 'right';
+    return null;
+  }
+  function snapRegion(zone) {
+    var W = vw(), H = vh(), hw = Math.round(W / 2), hh = Math.round(H / 2);
+    switch (zone) {
+      case 'top': return [0, 0, W, hh]; case 'bottom': return [0, hh, W, H - hh];
+      case 'left': return [0, 0, hw, H]; case 'right': return [hw, 0, W - hw, H];
+      case 'tl': return [0, 0, hw, hh]; case 'tr': return [hw, 0, W - hw, hh];
+      case 'bl': return [0, hh, hw, H - hh]; case 'br': return [hw, hh, W - hw, H - hh];
+    }
+    return null;
+  }
+  function showSnapPreview(zone) {
+    var r = zone && snapRegion(zone);
+    if (!r || !snapPreviewEl) { if (snapPreviewEl) snapPreviewEl.style.display = 'none'; return; }
+    snapPreviewEl.style.left = r[0] + 'px'; snapPreviewEl.style.top = r[1] + 'px';
+    snapPreviewEl.style.width = r[2] + 'px'; snapPreviewEl.style.height = r[3] + 'px';
+    snapPreviewEl.style.display = 'block';
+  }
+  function hideSnapPreview() { if (snapPreviewEl) snapPreviewEl.style.display = 'none'; }
+
   function Win(o) {
     var self = this;
     this.title = o.title || 'untitled'; this.iconName = o.icon || 'object';
@@ -1431,7 +1504,10 @@
     this.x = clamp(this.x, 0, Math.max(0, vw() - this.w)); this.y = clamp(this.y, 0, Math.max(0, vh() - this.h));
     this.iconified = false; this.maxed = null; this.aspect = 0; this.fixed = false; this.lockH = false; this.hidden = false; this.pendingReveal = false; this.before = WM.focused;   // a dialog gives focus back to the window it interrupted
 
-    this.tt = h('div', { class: 'fv-tt', text: this.title });
+    this.principal = o.principal || primaryPrincipal();     // the identity this window runs as (title-bar display + admin hazard)
+    this.ttLabel = h('div', { class: 'fv-ttl', text: this.title });   // the centred window title
+    this.idEl = h('div', { class: 'fv-id' });                // user@domain, on the right of the same title panel (Run-as only)
+    this.tt = h('div', { class: 'fv-tt' }, [this.ttLabel, this.idEl]);
     this.dropLabel = h('span', { text: '' });
     this.client = h('div', { class: 'fv-client' }, [o.content, h('div', { class: 'fv-drop' }, [this.dropLabel])]);
     var bMenu = h('button', { class: 'fv-tb m', type: 'button', 'aria-label': 'Window menu', title: 'Window menu (double-click closes)' }, [h('i')]);
@@ -1440,12 +1516,13 @@
     this.el = h('div', { class: 'fv-win', tabindex: '-1', role: 'dialog', 'aria-label': this.title }, [
       h('div', { class: 'fv-inner' }, [h('div', { class: 'fv-title' }, [bMenu, this.tt, bIco, bMax]), this.client])
     ]);
+    this.applyIdentity();
     ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'].forEach(function (dir) {
       var z = h('div', { class: 'fv-rs ' + dir });
       z.addEventListener('pointerdown', function (ev) { self.startResize(ev, dir); });
       self.el.insertBefore(z, self.el.firstChild);
     });
-    this.tt.addEventListener('pointerdown', function (ev) { self.startMove(ev); });
+    this.tt.addEventListener('pointerdown', function (ev) { self.startMove(ev); });   // the whole title panel (title + identity) drags the window
     this.tt.addEventListener('dblclick', function () { self.toggleMax(); });
     bMenu.addEventListener('click', function () { var r = bMenu.getBoundingClientRect(); windowMenu(self, r.left, r.bottom); });
     bMenu.addEventListener('dblclick', function () { closeMenus(); self.close(); });
@@ -1509,7 +1586,15 @@
     s.left = (this.dx * vw() + this.x) + 'px'; s.top = (this.dy * vh() + this.y) + 'px';
     s.width = this.w + 'px'; s.height = this.h + 'px';
   };
-  Win.prototype.setTitle = function (t) { this.title = t; this.tt.textContent = t; this.el.setAttribute('aria-label', t); if (this.iconEl) this.iconEl.lastChild.textContent = t; changed(); };
+  Win.prototype.setTitle = function (t) { this.title = t; this.ttLabel.textContent = t; this.el.setAttribute('aria-label', t); if (this.iconEl) this.iconEl.lastChild.textContent = t; changed(); };
+  // Only a Run-as window changes from the plain centred title: it left-aligns the title and shows user@domain on the
+  // right (and the red hazard bar when that principal is an administrator). A normal window is left exactly as before.
+  Win.prototype.applyIdentity = function () {
+    var p = this.principal, runAs = !!(p && p.runAs), u = p && p.userinfo, id = runAs ? ((u && u.identifier) || '') : '';
+    this.el.classList.toggle('fv-runas', runAs);
+    this.idEl.textContent = id; this.idEl.title = id;
+    this.el.classList.toggle('fv-admin', runAs && isAdminUserinfo(u));
+  };
   Win.prototype.setIcon = function (src) { this.iconURL = src; if (this.iconEl) { var b = this.iconEl.firstChild; b.textContent = ''; b.appendChild(iconImg(src, 36)); } };
   var TITLEBAR = 22, CHROME = 14;      // the title row, and the frame + inner-bevel padding around the client
   /* The height the window must have for a client area of width w at the locked aspect ratio (client w/h). */
@@ -1530,10 +1615,23 @@
     var min = WM.z; WM.wins.forEach(function (w) { min = Math.min(min, +w.el.style.zIndex || 0); });
     this.el.style.zIndex = min - 1; changed();
   };
+  // A window that can take an arbitrary size (not fixed-size, height-locked, or aspect-locked) snaps to screen edges.
+  Win.prototype.canSnap = function () { return !this.fixed && !this.lockH && !this.aspect && !this.maxed; };
+  Win.prototype.snapTo = function (zone) {
+    var r = snapRegion(zone); if (!r) return;
+    this.maxed = null;
+    this.x = r[0]; this.y = r[1]; this.w = Math.max(this.minW, r[2]); this.h = Math.max(this.minH, r[3]);
+    this.apply(); changed();
+  };
   Win.prototype.startMove = function (ev) {
     if (this.maxed) return;
-    var self = this, ox = this.x, oy = this.y;
-    dragSession(ev, 'move', function (dx, dy) { self.x = ox + dx; self.y = clamp(oy + dy, -4, vh() - 30); self.apply(); });
+    var self = this, ox = this.x, oy = this.y, snappable = this.canSnap(), zone = null;
+    dragSession(ev, 'move', function (dx, dy, e) {
+      self.x = ox + dx; self.y = clamp(oy + dy, -4, vh() - 30); self.apply();
+      if (snappable) { zone = snapZone(e.clientX, e.clientY); showSnapPreview(zone); }
+    }, function () {
+      if (snappable) { hideSnapPreview(); if (zone) self.snapTo(zone); }
+    });
   };
   Win.prototype.setFixed = function (on) { this.fixed = !!on; this.el.classList.toggle('fv-fixed', this.fixed); };
   Win.prototype.setFixedHeight = function (on) { this.lockH = !!on; this.el.classList.toggle('fv-fixh', this.lockH); };   // height locked, width still resizable
@@ -1710,10 +1808,17 @@
       '-',
       { label: 'Window list', submenu: windowListItems }, { label: 'Go to desk', submenu: function () { return deskItems(gotoDesk); } },
       { label: 'Focus: ' + (CFG.focus === 'sloppy' ? 'follows mouse' : 'click') + ' (toggle)', action: function () { CFG.focus = CFG.focus === 'sloppy' ? 'click' : 'sloppy'; } },
-      { label: 'Pager: ' + (CFG.pagerVisible ? 'visible' : 'hidden') + ' (toggle)', action: function () { CFG.pagerVisible = !CFG.pagerVisible; if (pagerEl) pagerEl.style.display = CFG.pagerVisible ? 'grid' : 'none'; } },
+      { label: 'Pager: ' + (CFG.pagerVisible ? 'visible' : 'hidden') + ' (toggle)', action: function () { CFG.pagerVisible = !CFG.pagerVisible; applyPagerVisibility(); saveCvwmPrefs(); } },
       { label: 'Dark mode: ' + (isDark() ? 'on' : 'off') + ' (toggle)', action: function () { setDark(!isDark()); } },
       '-',
-      { label: CD.auth ? 'Sign out' : 'Sign in\u2026', action: function () { if (CD.auth) { teardownScreen(); homeReadmeOpened = false; CD.auth = null; rescan(); } else signInDialog().then(function (ok) { if (ok) rescan(); }); } },
+      { label: CD.auth ? 'Sign out' : 'Sign in\u2026', action: function () {
+        if (CD.auth) {
+          teardownScreen(); homeReadmeOpened = false; CD.auth = null;
+          WM.wins.slice().forEach(function (w) { try { w.close(true); } catch (e) {} });   // close every open window on sign-out
+          disks = []; drawDisks(); applyPagerVisibility();                                  // drop the signed-out user's disks and hide the pager
+          promptLogin();                                                                     // present the login window; remount on a new sign-in
+        } else promptLogin();
+      } },
       { label: 'Known hosts', action: knownHostsWindow }, { label: 'About', action: aboutDialog }
     ]);
   }
@@ -1902,14 +2007,17 @@
     }
     return remaining === 0;                          // NFSv4: a bit no ALLOW covered is denied
   }
+  // A principal's userinfo names admin rights through its privileges (admin / cross_domain / administrator).
+  function isAdminUserinfo(u) { if (!u) return false; var priv = u.privileges; priv = Array.isArray(priv) ? priv.join(',') : String(priv || ''); return /\b(admin|cross_domain|administrator)\b/i.test(priv); }
+  // The signed-in session as a principal object (auth + userinfo), the default a window runs as.
+  function primaryPrincipal() { return { auth: CD.auth, userinfo: CD.userinfo, runAs: false }; }
   // Build the current principal, taking the owner/owning-group context from an object's representation.
   function principalFor(rep) {
     var u = CD.userinfo || {};
     var groups = Array.isArray(u.groups) ? u.groups.slice() : (typeof u.groups === 'string' ? u.groups.split(/[,\s]+/).filter(Boolean) : []);
-    var priv = u.privileges; priv = Array.isArray(priv) ? priv.join(',') : String(priv || '');
     var md = (rep && rep.metadata) || {};
     return { identifier: u.identifier || null, groups: groups, authenticated: !!CD.auth,
-      admin: /\b(admin|cross_domain|administrator)\b/i.test(priv), owner: md.cdmi_owner || null, owningGroup: md.cdmi_group || null };
+      admin: isAdminUserinfo(u), owner: md.cdmi_owner || null, owningGroup: md.cdmi_group || null };
   }
 
   function maskToNames(mask, forDir) {
@@ -2152,9 +2260,30 @@
     w.el.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' && ev.target.tagName === 'INPUT') ok.click(); });
   }
 
+  // The About icon is the desktop's own icon -- the same image the file browser shows for the desktop container.
+  // It is read from that container (found via the system-fork path on the script tag); falling back to index.png
+  // served beside this page, and then to the system glyph where neither is reachable (e.g. a classic deploy).
+  function aboutIcon(size) {
+    var box = h('div', { class: 'fv-about-icon' });
+    var img = h('img', { alt: '', width: String(size), height: String(size) });
+    img.addEventListener('error', function () { box.innerHTML = icon('system', size); });
+    var sf = systemForkURL(), desk = sf ? sf.replace(/rsrc\/$/, '') : null;
+    (desk ? loadIcon(desk) : Promise.resolve(null)).then(function (src) { img.src = src || 'index.png'; }, function () { img.src = 'index.png'; });
+    box.appendChild(img);
+    return box;
+  }
   function aboutDialog() {
-    messageBox('About cvwm ' + API.version, 'cvwm ' + API.version + ', the CDMI Virtual Window Manager. Disks are the base URIs listed by ' + WELL_KNOWN + 'cdmi_namespaces/ at ' + CD.origin +
-      '. A container holding ' + CFG.appEntry + ' runs as an application.');
+    var ok = h('button', { class: 'fv-btn', type: 'button', text: 'OK', 'data-autofocus': '' });
+    var about = h('div', { class: 'fv-about' }, [
+      aboutIcon(48),
+      h('div', { class: 'fv-about-text' }, [
+        h('h3', { text: 'cvwm' }),
+        h('p', { class: 'ver', text: 'Version ' + API.version }),
+        h('p', { text: 'The CDMI Virtual Window Manager. Disks are the base URIs listed by ' + WELL_KNOWN + 'cdmi_namespaces/ at ' + CD.origin + '. A container holding ' + CFG.appEntry + ' runs as an application.' })
+      ])
+    ]);
+    var w = new Win({ title: 'About cvwm', w: 470, h: 260, center: true, escCloses: true, content: h('div', { class: 'fv-form' }, [about, h('div', { class: 'fv-row end' }, [ok])]) });
+    ok.addEventListener('click', function () { w.close(); }); ok.focus();
   }
 
   async function showCapabilities() {
@@ -2176,6 +2305,7 @@
   function pickObject(opts) {
     opts = opts || {};
     var save = opts.mode === 'save';
+    var principalAuth = opts.auth || CD.auth;                  // list/read as the calling app's principal (Run as…), else the signed-in session
     var dark = opts.theme ? opts.theme === 'dark' : isDark();   // the calling app chooses the theme; otherwise the desktop's own setting
     return new Promise(function (resolve) {
       var done = false, at = null;                              // at: { base, name, segs } or null (disk list)
@@ -2195,7 +2325,7 @@
       var selEl = null, sel = null, vmode = false;            // the selected row/target, and whether the list is showing versions
       var footer = save ? h('div', { class: 'fv-row', style: 'gap:8px' }, [nameIn, cancel, okBtn])
         : h('div', { class: 'fv-row', style: 'gap:8px' }, [versionsBtn, h('span', { style: 'flex:1' }), cancel, openBtn]);
-      var w = new Win({ title: opts.title || (save ? 'Save' : 'Open'), w: 460, h: 420, center: true, escCloses: true,
+      var w = new Win({ title: opts.title || (save ? 'Save' : 'Open'), w: 460, h: 420, center: true, escCloses: true, principal: opts.principal || null,
         onClose: function () { if (!done) { done = true; resolve(null); } },
         content: h('div', { class: 'fv-pick' }, save ? [where, rows, hint, footer] : [where, rows, footer]) });
       if (dark) w.el.classList.add('fv-dark');                 // a dark-themed caller gets a dark dialog
@@ -2250,7 +2380,7 @@
         where.textContent = loc.name + ':/' + loc.segs.map(function (x) { return x + '/'; }).join('');
         rows.appendChild(h('p', { text: 'Reading \u2026' }));
         var listed;
-        try { listed = await listContainer(dirURL(loc), loc.base, true); }   // detailed: one extended listing carries each child's version metadata
+        try { listed = await listContainer(dirURL(loc), loc.base, true, principalAuth); }   // detailed: one extended listing carries each child's version metadata
         catch (e) { rows.textContent = ''; rows.appendChild(h('p', { text: 'Could not read this container: ' + (e && e.message || e) })); return; }
         if (at !== loc) return;
         rows.textContent = '';
@@ -2283,7 +2413,7 @@
         while (queue.length && n < LIMIT) {
           var id = queue.shift(); if (!id || seen[id]) continue; seen[id] = 1; n++;
           try {
-            var vm = (await getRep(at(id) + '?metadata', T_OBJECT)).rep.metadata || {};
+            var vm = (await getRep(at(id) + '?metadata', T_OBJECT, { auth: principalAuth })).rep.metadata || {};
             out.push({ url: at(id), when: vm.cdmi_mtime || vm.cdmi_ctime || null, size: (vm.cdmi_size != null && isFinite(+vm.cdmi_size)) ? +vm.cdmi_size : null, current: id === current });
             (vm.cdmi_version_children || []).forEach(function (k) { queue.push(k); });
           } catch (e) { out.push({ url: at(id), when: null, size: null, current: id === current }); }
@@ -2312,7 +2442,9 @@
     });
   }
 
-  function signInDialog(why) {
+  function signInDialog(why, capture) {
+    // capture: do not touch the signed-in session; resolve with the Authorization value (or null if cancelled), so the
+    // caller (Run as…) can run an application as that principal. Otherwise this sets CD.auth and resolves true/false.
     return new Promise(function (resolve) {
       var n = ++uid, methods = (CD.caps && CD.caps.cdmi_authentication_methods) || ['basic', 'bearer'];
       methods = methods.filter(function (m) { return m === 'basic' || m === 'bearer'; }); if (!methods.length) methods = ['basic', 'bearer'];
@@ -2334,10 +2466,12 @@
       })));
       function sync() { user.row.style.display = pass.row.style.display = mode === 'basic' ? '' : 'none'; tok.row.style.display = mode === 'bearer' ? '' : 'none'; status.textContent = ''; }
       var cancel = h('button', { class: 'fv-btn', type: 'button', text: 'Cancel' }), ok = h('button', { class: 'fv-btn', type: 'button', text: 'Sign in' });
-      var w = new Win({ title: 'Sign in \u00B7 ' + CD.origin, w: 440, h: 290, center: true, escCloses: true, onClose: function () { if (!done) resolve(false); },
-        content: h('div', { class: 'fv-form' }, [h('p', { text: (why ? why + ' ' : '') + 'Credentials are kept in memory for this page only and are handed to applications you run.' }), radios, user.row, pass.row, tok.row, status, h('div', { class: 'fv-row end' }, [cancel, ok])]) });
+      // Cancel only in capture mode (Run as\u2026): the main login cannot be cancelled, and cannot be dismissed with Escape.
+      var w = new Win({ title: capture ? 'Run as' : ('Sign in \u00B7 ' + CD.origin), w: 440, h: 290, center: true, escCloses: !!capture, onClose: function () { if (!done) resolve(capture ? null : false); },
+        content: h('div', { class: 'fv-form' }, [h('p', { text: (why ? why + ' ' : '') + 'Credentials are kept in memory for this page only and are handed to applications you run.' }), radios, user.row, pass.row, tok.row, status, h('div', { class: 'fv-row end' }, capture ? [cancel, ok] : [ok])]) });
       sync();
       function submit() {
+        var authValue;
         if (mode === 'basic') {
           var val = user.input.value.trim();
           // Require the full user@domain when a domain is known, and present only the name before the "@".
@@ -2348,15 +2482,66 @@
             name = val.slice(0, at);
           }
           if (!name) { status.textContent = 'Enter a user name.'; return; }
-          CD.auth = 'Basic ' + btoa(unescape(encodeURIComponent(name + ':' + pass.input.value)));
+          authValue = 'Basic ' + btoa(unescape(encodeURIComponent(name + ':' + pass.input.value)));
         } else {
           if (!tok.input.value.trim()) { status.textContent = 'Enter a token.'; return; }
-          CD.auth = 'Bearer ' + tok.input.value.trim();
+          authValue = 'Bearer ' + tok.input.value.trim();
         }
-        done = true; w.close(); resolve(true);
+        done = true; w.close();
+        if (capture) resolve(authValue); else { CD.auth = authValue; resolve(true); }
       }
       ok.addEventListener('click', submit); cancel.addEventListener('click', function () { w.close(); });
       w.el.addEventListener('keydown', function (ev) { if (ev.key === 'Enter' && ev.target.tagName === 'INPUT') submit(); });
+    });
+  }
+
+  // Read a principal's identity (identifier, privileges, groups) as another user, for Run as…: probe a mounted base for
+  // its domainURI, then read that domain's cdmi_domain_userinfo under the given credential. No globals touched.
+  async function fetchUserinfoWith(auth) {
+    if (!auth) return null;
+    // Try broadly-readable namespace bases first, then any mounted disk: the run-as principal may not be able to read
+    // another user's home, but can read the shared namespace root's domainURI and that domain's userinfo item.
+    var bases = nsBases.concat(disks.map(function (d) { return d && d.base; })).filter(Boolean), seen = {};
+    for (var i = 0; i < bases.length; i++) {
+      var base = bases[i]; if (seen[base]) continue; seen[base] = 1;
+      try {
+        var got = await getRep(base + '?domainURI', T_CONTAINER, { quiet: true, auth: auth });
+        var domainURI = got.rep.domainURI; if (!domainURI) continue;
+        var url = domainURI.indexOf('http') === 0 ? domainURI : base + domainURI.replace(/^\//, '');
+        if (!/\/$/.test(url)) url += '/';
+        var dom = (await getRep(url + '?metadata=cdmi_domain_userinfo', T_DOMAIN, { quiet: true, auth: auth })).rep;
+        var value = dom && dom.metadata && dom.metadata.cdmi_domain_userinfo;
+        if (typeof value === 'string') { try { value = JSON.parse(value); } catch (e) { continue; } }
+        if (value) return value;
+      } catch (e) { /* try the next base */ }
+    }
+    return null;
+  }
+  // Collect a separate principal's credentials (without disturbing the signed-in session) and its identity.
+  async function runAsCredentials() {
+    var auth = await signInDialog('Run as another user.', true);
+    if (!auth) return null;                                                 // cancelled
+    var userinfo = await fetchUserinfoWith(auth);
+    return { auth: auth, userinfo: userinfo || null, runAs: true };
+  }
+  // Run as… from an app's context menu: sign in as another user, then launch the app as that principal. Same origin,
+  // so this is a convenience, not an isolation boundary -- the credential is as reachable as any other app's.
+  async function runAsLaunch(appURL) {
+    var principal = await runAsCredentials();
+    if (!principal) return;
+    launchApp(appURL, { principal: principal });
+  }
+
+  // The main login: show the sign-in window (no Cancel), then verify by rescanning. A failed sign-in (bad credentials,
+  // so no home/userinfo resolves) clears the attempt and shows the login window again.
+  function promptLogin(why) {
+    return signInDialog(why).then(function (ok) {
+      if (!ok) { rescan(); return false; }                              // dismissed via the window menu: proceed anonymously
+      return Promise.resolve(rescan()).then(function () {
+        if (CD.auth && CD.userinfo) return true;                        // signed in
+        CD.auth = null; disks = []; drawDisks(); applyPagerVisibility();  // login failed: back to the login window
+        return promptLogin('Sign-in failed. Check your user name and password.');
+      });
     });
   }
 
@@ -3407,6 +3592,7 @@
   /* ------------------------------------------------------------------ disks */
 
   var disks = [];           // {name, base, locked, manual}
+  var nsBases = [];         // discovered namespace base URIs (broadly readable), used to resolve a Run-as principal's userinfo
 
   // Manual mounts persist across sessions. A cross-origin base is kept too (Option B); the credential still only
   // travels to an origin that has passed a CORS preflight (vouchCrossOrigin, req/send), so a stored cross-origin
@@ -3715,6 +3901,7 @@
     }
     await readCapabilities();
     try { found = await discover(); } catch (e) { problem = e.message; }
+    nsBases = (found || []).map(function (f) { return f.base; }).filter(Boolean);   // readable bases for resolving a Run-as principal's identity
     // Discovered namespaces are not auto-mounted: only the signed-in principal's home is (mountHome), plus any the
     // user mounted by hand. A discovered "home?" reference is the one exception -- it *is* home, so it is kept.
     // The full discovery result stays available (as `found`) to probe for the home and for the namespaces app.
@@ -3722,7 +3909,7 @@
     disks = foundHome.concat(loadManual().map(function (m) { return { name: m.name, base: m.base, manual: true, crossOrigin: !sameOrigin(m.base) }; })
       .filter(function (m) { return !foundHome.some(function (f) { return f.base === m.base; }); }));
     try { await mountHome(found); } catch (e) { console.warn('[cdmi] home: ' + (e && e.message || e)); }
-    drawDisks(); vouchCrossOrigin(); locateHelpers(); loadLocaleFromHome();
+    drawDisks(); vouchCrossOrigin(); locateHelpers(); loadLocaleFromHome(); loadCvwmPrefs();
     (function () { var home = homeDisk(); if (home) loadAppRegistry(home.base).then(function () { browsers.forEach(function (b) { if (!b.win.closed) b.show(b.url); }); }).catch(function () {}); })();
     if (!disks.length) {
       if (found === null) connectDialog(problem ? 'Discovery failed: ' + problem + '. Enter a base URI to mount it as a disk.'
@@ -3826,9 +4013,13 @@
   // field, and is the only array among the fields (objectName/value/vte/mimetype are scalars), so it is recognized by
   // being an array at or past the named-field count.
   function forkNested(tuple, at) { for (var i = RSRC_FIELDS.length; i < tuple.length; i++) if (Array.isArray(tuple[i])) return tuple[i]; return null; }
+  // The resource fork now preserves file extensions, so an object is named e.g. "en.json" or "mdviewer.css". Apps address
+  // a resource by its short id ("en", "mdviewer"); so each entry is keyed by BOTH its full name and that short id.
+  function rsrcSlug(nm) { nm = String(nm).replace(/\/$/, ''); var i = nm.lastIndexOf('.'); return i > 0 ? nm.slice(0, i) : nm; }
+  function forkPut(map, name, val) { name = String(name).replace(/\/$/, ''); map[name] = val; var s = rsrcSlug(name); if (s && s !== name) map[s] = val; }
   function forkCatItems(under, at) {
     var items = {};
-    (under || []).forEach(function (e) { if (!Array.isArray(e)) return; var n = e[at.objectName] || ''; if (!n || /\/$/.test(n)) return; items[n] = forkVal(e, at); });
+    (under || []).forEach(function (e) { if (!Array.isArray(e)) return; var n = e[at.objectName] || ''; if (!n || /\/$/.test(n)) return; forkPut(items, n, forkVal(e, at)); });
     return items;
   }
   // Parse a top-level recursive listing (each entry a tuple, containers carrying a nested children array) into the map.
@@ -3838,8 +4029,8 @@
       if (!Array.isArray(t)) return;
       var nm = t[at.objectName] || ''; if (!nm) return;
       var isC = /\/$/.test(nm) || t[at.objectType] === T_CONTAINER, bare = nm.replace(/\/$/, '');
-      if (isC) out[bare] = { kind: 'object', items: forkCatItems(forkNested(t, at) || [], at) };
-      else out[bare] = { kind: 'collection', data: forkCollection(forkVal(t, at).value) };
+      if (isC) forkPut(out, bare, { kind: 'object', items: forkCatItems(forkNested(t, at) || [], at) });
+      else forkPut(out, bare, { kind: 'collection', data: forkCollection(forkVal(t, at).value) });
     });
     return out;
   }
@@ -3871,7 +4062,7 @@
       kids.forEach(function (t) {
         var nm = t[at.objectName] || ''; if (!nm) return;
         if (/\/$/.test(nm) || t[at.objectType] === T_CONTAINER) { containers.push(nm.replace(/\/$/, '')); return; }
-        out[nm] = { kind: 'collection', data: forkCollection(forkVal(t, at).value) };
+        forkPut(out, nm, { kind: 'collection', data: forkCollection(forkVal(t, at).value) });
       });
     } else {
       var names = normChildren(kids, null);
@@ -3892,14 +4083,14 @@
             var tn = cch[k][cat2.objectName] || ''; if (!tn || /\/$/.test(tn)) continue;
             var it = forkVal(cch[k], cat2);
             if (it.value === undefined || it.value === null) { var gg = await getLeaf(forkURL + enc(cat) + '/' + enc(tn), { quiet: true }); it = { value: gg.rep.value, enc: gg.rep.valuetransferencoding || 'utf-8', mimetype: gg.rep.mimetype || '' }; }
-            items[tn] = it;
+            forkPut(items, tn, it);
           }
         } else {
           var cn = normChildren(cch, null);
-          for (var m = 0; m < cn.length; m++) { var tn2 = cn[m].name.replace(/\/$/, ''); var g2 = await getLeaf(forkURL + enc(cat) + '/' + enc(tn2), { quiet: true }); items[tn2] = { value: g2.rep.value, enc: g2.rep.valuetransferencoding || 'utf-8', mimetype: g2.rep.mimetype || '' }; }
+          for (var m = 0; m < cn.length; m++) { var tn2 = cn[m].name.replace(/\/$/, ''); var g2 = await getLeaf(forkURL + enc(cat) + '/' + enc(tn2), { quiet: true }); forkPut(items, tn2, { value: g2.rep.value, enc: g2.rep.valuetransferencoding || 'utf-8', mimetype: g2.rep.mimetype || '' }); }
         }
       }
-      out[cat] = { kind: 'object', items: items };
+      forkPut(out, cat, { kind: 'object', items: items });
     }
     return out;
   }
@@ -3910,24 +4101,57 @@
   function appForkURL(containerURL) { return stripQuery(containerURL).replace(/\/?$/, '/') + 'rsrc/'; }
   function systemForkURL() { var u = attr('data-rsrc'); return u ? (/\/$/.test(u) ? u : u + '/') : null; }
 
+  // Compare dotted numeric versions (2.9.0 < 2.10.0); missing components count as 0, any non-numeric suffix is ignored.
+  // A '*' component is a wildcard: it matches any value in that position, so an app built against '*.*.*' compares
+  // equal to every version and runs on all of them, and '2.*.*' runs on any 2.x.x (see docs/app-compatibility.md).
+  function cmpVer(a, b) {
+    var x = String(a == null ? '' : a).split('.'), y = String(b == null ? '' : b).split('.');
+    for (var i = 0; i < Math.max(x.length, y.length); i++) {
+      if ((x[i] || '').trim() === '*' || (y[i] || '').trim() === '*') continue;
+      var dx = parseInt(x[i], 10) || 0, dy = parseInt(y[i], 10) || 0;
+      if (dx !== dy) return dx < dy ? -1 : 1;
+    }
+    return 0;
+  }
+  // The compatibility gate. An app declares, in rsrc/manifest.json, the cvwm version it was built against; the
+  // packaging tools stamp it (see docs/app-compatibility.md). Return null when the app may run, or the message to show
+  // instead. An app that declares nothing is treated as too old on purpose: it predates this contract.
+  function appCompat(builtAgainst) {
+    if (!builtAgainst) return 'This application does not say which version of cvwm it was built for, so it cannot run on this version (' + VERSION + '). A newer version of the application is needed.';
+    if (cmpVer(builtAgainst, MIN_APP_VERSION) < 0) return 'This application was built for cvwm ' + builtAgainst + ', which this version (' + VERSION + ') no longer supports. A newer version of the application is needed.';
+    if (cmpVer(builtAgainst, VERSION) > 0) return 'This application was built for cvwm ' + builtAgainst + ', which is newer than this version (' + VERSION + '). A newer version of cvwm is needed to run it.';
+    return null;
+  }
+
   async function launchApp(containerURL, extra) {
     var d = diskFor(containerURL), label = (d ? d.name + ':' + pathIn(d, containerURL) : containerURL);
     try {
+      // Resource fork: warm the app's own fork (parent-side, where the credential is). Empty => a classic app, and the
+      // rsrc plumbing is skipped so it behaves exactly as before. The shared system fork is warmed below once we know
+      // the app runs. The iframe builds CTX.rsrc / CTX.sys.rsrc from these same cached loads.
+      var appFork = appForkURL(containerURL), sysFork = systemForkURL(), forkMap = {}, hasRsrc = false;
+      try { forkMap = await loadRsrcFork(appFork); hasRsrc = Object.keys(forkMap).length > 0; } catch (e) { forkMap = {}; hasRsrc = false; }
+      // Compatibility gate (appCompat): the app's rsrc/manifest.json declares the cvwm it was built against. Refuse an
+      // app this build cannot run -- and refuse one that declares nothing -- before fetching or running its code.
+      var mani = (forkMap['manifest.json'] && forkMap['manifest.json'].data) || null;
+      var builtAgainst = (mani && typeof mani.builtAgainst === 'string') ? mani.builtAgainst : null;
+      var incompat = appCompat(builtAgainst);
+      if (incompat) { messageBox('Cannot run ' + label, incompat); return; }
+
       var got = await readObject(containerURL + enc(CFG.appEntry)), val = await readValue(got);
       var source = val.text !== undefined ? val.text : bytesToText(val.bytes);
       var id = 'app' + (++uid), blob = URL.createObjectURL(new Blob([source + '\n//# sourceURL=' + containerURL + CFG.appEntry], { type: 'text/javascript' }));
       var proc = extra && extra.process;          // started as a command: argv, cwd, and somewhere to write (see DEVELOPERS.md)
+      var principal = (extra && extra.principal) || primaryPrincipal();   // Run as… passes another principal; default is the signed-in session
       var home = homeDisk();
-      // Resource fork: warm the app's own fork (parent-side, where the credential is). Empty => a classic app, and the
-      // rsrc plumbing is skipped so it behaves exactly as before. A fork app also warms the shared system fork (cached
-      // once for every app that shares it). The iframe builds CTX.rsrc / CTX.sys.rsrc from these same cached loads.
-      var appFork = appForkURL(containerURL), sysFork = systemForkURL(), hasRsrc = false;
-      try { hasRsrc = Object.keys(await loadRsrcFork(appFork)).length > 0; } catch (e) { hasRsrc = false; }
       if (hasRsrc && sysFork) { try { await loadRsrcFork(sysFork); } catch (e) { /* no system fork; CTX.sys.rsrc resolves nothing */ } }
+      var iconURL = null; try { iconURL = await loadIcon(containerURL); } catch (e) { iconURL = null; }   // the container's own icon (index.png/svg) as a blob URL, passed in so an app can render its own icon (e.g. the desktop stub's About box)
       var ctx = { id: id, origin: CD.origin, containerURI: containerURL, baseURI: d ? d.base : containerURL, diskName: d ? d.name : '', homeURI: home ? home.base : null, startURI: (extra && extra.start) || null,
-        namespaces: disks.map(function (x) { return { name: x.name, baseURI: x.base }; }), headers: CD.auth ? { Authorization: CD.auth } : {},
-        principal: (CD.userinfo && CD.userinfo.identifier) || null, mcpUri: (CD.caps && CD.caps.cdmi_mcp_uri) || null,
+        namespaces: disks.map(function (x) { return { name: x.name, baseURI: x.base }; }), headers: principal.auth ? { Authorization: principal.auth } : {},
+        principal: (principal.userinfo && principal.userinfo.identifier) || null, mcpUri: (CD.caps && CD.caps.cdmi_mcp_uri) || null,
         locale: normLocale(LOCALE),                   // the user's locale; apps also follow the live "cvwm.locale" signal
+        cvwmVersion: VERSION,                          // this desktop's version, so a running app can feature-detect (cmpVer against CTX.cvwmVersion)
+        iconURL: iconURL,                              // the app container's own icon, as a blob URL (same image the file browser shows); null if it has none
         __entry: blob, __hasRsrc: hasRsrc, __appFork: appFork, __sysFork: sysFork };
       var json = JSON.stringify(ctx).replace(/</g, '\\u003c');
       // The resource manager, built inside the iframe over the maps the parent loaded, so realm-sensitive work (a code
@@ -3945,7 +4169,7 @@
         '<style>' + SCROLLBAR_CSS + '\nhtml,body{margin:0;height:100%;background:transparent;color:#ddd}</style><script>(function(){var D=parent.cvwm,c=' + json + ';' +
         'c.setTitle=function(t){D.app(c.id,"title",String(t))};c.resize=function(w,h){D.app(c.id,"resize",[+w,+h])};c.fixed=function(w,h){D.app(c.id,"fixed",[+w,+h])};c.fixedHeight=function(w,h){D.app(c.id,"fixheight",[+w,+h])};c.visible=function(v){D.app(c.id,"visible",!!v)};c.aspect=function(r){D.app(c.id,"aspect",+r||0)};c.setDirty=function(d){D.app(c.id,"dirty",!!d)};c.close=function(){D.app(c.id,"close")};c.open=function(u){D.app(c.id,"open",String(u))};' +
         'c.console={};["log","info","warn","error","debug"].forEach(function(lv){c.console[lv]=function(){var a=[];for(var i=0;i<arguments.length;i++)a.push(arguments[i]);D.app(c.id,"log",[lv,a]);};});' +
-        'D.capture(window,c.id);c.desktop=D;c.net=D.netFor(c.id);var p=D.app(c.id,"process");if(p){c.argv=p.argv;c.cwd=p.cwd;c.stdout=p.stdout;c.stderr=p.stderr;c.shell=p.shell;c.exit=function(n){D.app(c.id,"exit",n|0)};}' +
+        'D.capture(window,c.id);var DT=Object.create(D);DT.pickObject=function(o){return D.pickObjectFor(c.id,o||{});};c.desktop=DT;c.net=D.netFor(c.id);var p=D.app(c.id,"process");if(p){c.argv=p.argv;c.cwd=p.cwd;c.stdout=p.stdout;c.stderr=p.stderr;c.shell=p.shell;c.exit=function(n){D.app(c.id,"exit",n|0)};}' +
         mkMgr +
         'function run(){var s=document.createElement("script");s.src=c.__entry;(document.body||document.documentElement).appendChild(s);}' +
         'window.CDMI_CONTEXT=c;' +
@@ -3953,12 +4177,13 @@
         '})();<\/script></head><body></body></html>';
       var frame = h('iframe', { title: label, allow: 'fullscreen' });        // so an application may present full screen
       var noDoc = !(extra && extra.start);                                    // launched with no document: start hidden, reveal on the app's first signal (below)
-      var w = new Win({ title: label, icon: 'app', w: 720, h: 420, minW: 260, minH: 140, hidden: noDoc, content: frame, onClose: function () { delete apps[id]; URL.revokeObjectURL(blob); if (proc && proc.onExit) { try { proc.onExit(w.exitCode || 0); } catch (e) { console.error(e); } } } });
+      var w = new Win({ title: label, icon: 'app', w: 720, h: 420, minW: 260, minH: 140, hidden: noDoc, principal: principal, content: frame, onClose: function () { delete apps[id]; w.principal = null; URL.revokeObjectURL(blob); if (proc && proc.onExit) { try { proc.onExit(w.exitCode || 0); } catch (e) { console.error(e); } } } });   // drop the credential reference on close
       if (noDoc) setTimeout(function () { if (w.pendingReveal) w.setVisible(true); }, 2000);   // safety net: reveal a hidden app that never signalled and never asked to stay hidden
       w.process = proc || null;
+      w.noMigrate = !!principal.runAs;    // a Run-as window carries another user's credential: never serialize/migrate it to another screen
       w.extraMenu = function () { return [{ label: 'Browse contents', action: function () { openContainer(containerURL, { browse: true }); } }, { label: 'Restart', action: function () { frame.srcdoc = doc; } }]; };
       apps[id] = w; w.containerURI = containerURL;
-      loadIcon(containerURL).then(function (src) { if (src) w.setIcon(src); });
+      if (iconURL) w.setIcon(iconURL);
       // Native "open a Markdown file" pane, shown before the app has a document. It is a real desktop element, so a
       // dropped host file or a dragged cvwm object lands on it directly (an iframe cannot see an internal cvwm drag).
       // dropPaneHandlers[id] = { onFile(file), onObject(url) }; showApp(id) swaps to the iframe once a document loads.
@@ -4193,6 +4418,30 @@
     } catch (e) { /* none saved */ }
   }
 
+  /* ---- desktop preferences (~/prefs/cvwm.json): the pager's visibility and the desk grid. The pager is shown only
+     once signed in, and then only if these preferences allow it. ---- */
+  function applyPagerVisibility() { if (pagerEl) pagerEl.style.display = (CD.auth && CFG.pagerVisible) ? 'grid' : 'none'; }
+  async function loadCvwmPrefs() {
+    var home = homeDisk(); if (!home) { applyPagerVisibility(); return; }
+    try {
+      var got = await getRep(home.base + CFG.prefsDir + 'cvwm.json?value', T_OBJECT, { quiet: true });
+      var raw = got.rep.value; if (got.rep.valuetransferencoding === 'base64') raw = b64text(raw);
+      var pg = (JSON.parse(raw) || {}).pager || {};
+      if (typeof pg.visible === 'boolean') CFG.pagerVisible = pg.visible;
+      if (+pg.desksX > 0) CFG.desksX = +pg.desksX; if (+pg.desksY > 0) CFG.desksY = +pg.desksY;
+    } catch (e) { /* none saved: defaults stand */ }
+    if (resizeDesktop) resizeDesktop();              // the desk grid may have changed
+    applyPagerVisibility(); if (pagerEl) drawPager();
+  }
+  async function saveCvwmPrefs() {
+    var home = homeDisk(); if (!home) return;
+    var body = { pager: { visible: CFG.pagerVisible, desksX: CFG.desksX, desksY: CFG.desksY } };
+    try {
+      await ensureContainer(home.base + CFG.prefsDir);
+      await send('PUT', home.base + CFG.prefsDir + 'cvwm.json', T_OBJECT, JSON.stringify({ mimetype: 'application/json', metadata: {}, valuetransferencoding: 'utf-8', value: JSON.stringify(body, null, 2) }));
+    } catch (e) { /* best effort */ }
+  }
+
   /* ---------------------------------------------------------------- the app registry (~/prefs/apps.json)
 
      Which application opens an object, and which icon the object shows, come from a registry: the apps the user has
@@ -4207,10 +4456,12 @@
   function appURIof(homeBase, rel) { return /^https?:/i.test(rel) ? rel : homeBase + String(rel).replace(/^\//, ''); }
   function iconSpecFor(appURI, icon) { if (!icon) return { app: appURI }; if (ICONS[icon]) return { builtin: icon }; return { app: appURI, path: String(icon) }; }
   async function readFiletypes(appURI) {
+    // The resource fork preserves file extensions, so the manifest is the object "rsrc/filetypes.json".
     try {
-      // The resource fork drops a file's extension on install (filetypes.json is served as the object "filetypes").
-      var got = await getRep(appURI + 'rsrc/filetypes?value', T_OBJECT, { quiet: true });
-      var raw = got.rep.value; if (got.rep.valuetransferencoding === 'base64') raw = b64text(raw);
+      var got = await getRep(appURI + 'rsrc/filetypes.json?value', T_OBJECT, { quiet: true });
+      var raw = got.rep.value;
+      if (raw && typeof raw === 'object') return Array.isArray(raw.types) ? raw.types : [];
+      if (got.rep.valuetransferencoding === 'base64') raw = b64text(raw);
       var m = JSON.parse(raw); return Array.isArray(m.types) ? m.types : [];
     } catch (e) { return null; }     // null: not an app that declares types (or unreadable)
   }
@@ -4606,7 +4857,7 @@
       var nameWrap = asList ? h('span', { class: 'fv-nm', style: depth ? 'padding-left:' + (depth * 18) + 'px' : null }, [tw, picWrap, nameEl]) : null;
       var item = h('div', { class: 'fv-item' + (sys ? ' sys' : ''), role: 'button', tabindex: '0', title: c.name + (c.type ? '  (' + c.type + ')' : '') }, asList
         ? [nameWrap, kindCell, modCell, sizeCell]
-        : [picWrap, nameEl]);
+        : [picWrap, h('span', { class: 'fv-label' }, [nameEl])]);   // the label box reserves two lines; the name sizes to its content (see .fv-label CSS)
       item.dataset.depth = String(depth);
       if (expandable) tw.addEventListener('click', function (ev) { ev.stopPropagation(); ev.preventDefault(); toggleExpand(item, url, depth, tw); });
       // The list view needs each child's time and size. A listing that is not detailed does not carry them (a server
@@ -4651,6 +4902,7 @@
         var mkind = (c.type === T_CAPABILITY || c.type === T_DOMAIN) ? 'other' : c.kind;
         popupMenu(ev.clientX, ev.clientY, c.name, [
           { label: isApp ? 'Run' : 'Open', action: function () { open(false); } },
+          { label: 'Run as…', disabled: !isApp, action: function () { runAsLaunch(url); } },   // sign in as another user and run this app as them
           { label: 'Open in mdviewer', disabled: !helpers.mdviewer || c.kind !== 'object' || !(/\.(md|markdown|mdown|mkd)$/i.test(stripQuery(url))), action: function () { launchApp(helpers.mdviewer, { start: url }); } },
           { label: 'Open in Textile', disabled: !helpers.textile || c.kind !== 'object', action: function () { launchApp(helpers.textile, { start: url }); } },
           { label: 'View', disabled: c.kind === 'container', action: function () { openObject(url, c.name, self, false, true); } },
@@ -4960,7 +5212,16 @@
       return { origin: origin, namespaces: out };
     },
     pickObject: function (opts) { return pickObject(opts || {}); },      // a common Open dialog (FVWM styled)
+    pickObjectFor: function (id, opts) {                                  // an app's Open dialog: it inherits the calling app's principal (credential + identity)
+      var w = apps[id]; opts = opts || {};
+      if (w && w.principal) { if (!('auth' in opts)) opts.auth = w.principal.auth; if (!('principal' in opts)) opts.principal = w.principal; }
+      return pickObject(opts);
+    },
     iconSvg: function (name, size) { return ICONS[name] ? svg(ICONS[name], size || 20) : null; },   // a built-in icon's SVG markup, for the Apps panel
+    reloadApps: function () {   // the Apps panel calls this after editing ~/prefs/apps.json so dispatch and icons pick up the change at once
+      var home = homeDisk(); if (!home) return Promise.resolve();
+      return loadAppRegistry(home.base).then(function () { browsers.forEach(function (b) { if (!b.win.closed) b.show(b.url); }); }).catch(function () {});
+    },
     dropPane: function (id, handlers) { showDropPane(id, handlers || {}); },   // show a native "open a file" drop pane for an app
     showApp: function (id) { showApp(id); },                                  // swap from the drop pane to the app's iframe
     /* For the console application. */
@@ -5011,12 +5272,15 @@
     disksEl = h('div', { class: 'fv-disks', role: 'group', 'aria-label': 'Namespaces' });
     iconsEl = h('div', { class: 'fv-icons', role: 'group', 'aria-label': 'Iconified windows' });
     pagerEl = h('div', { class: 'fv-pager', role: 'group', 'aria-label': 'Pager' });
-    root = h('div', { id: 'fv-root' }, [disksEl, view, iconsEl, pagerEl, shield]);       // DOM order is stacking order: windows cover the disks
+    snapPreviewEl = h('div', { class: 'fv-snap', 'aria-hidden': 'true' });
+    root = h('div', { id: 'fv-root' }, [disksEl, view, iconsEl, pagerEl, snapPreviewEl, shield]);   // DOM order is stacking order: windows cover the disks
     document.body.appendChild(root);
     applyTheme(isDark());                                                                // the shared light/dark setting
 
     function sizeView() { view.style.width = vw() * CFG.desksX + 'px'; view.style.height = vh() * CFG.desksY + 'px'; WM.wins.forEach(function (w) { if (w.maxed) { if (w.aspect) { w.w = vw(); w.h = w.heightForWidth(w.w); if (w.h > vh()) { w.h = vh(); w.w = Math.round((w.h - 36) * w.aspect) + 14; } w.x = Math.round((vw() - w.w) / 2); w.y = Math.round((vh() - w.h) / 2); } else { w.w = vw(); w.h = vh(); } } w.apply(); }); gotoDesk(WM.desk[0], WM.desk[1]); }
+    resizeDesktop = sizeView;
     window.addEventListener('resize', sizeView); sizeView();
+    applyPagerVisibility();                                                               // the pager stays hidden until a user signs in (see loadCvwmPrefs)
 
     function onDesktop(ev) { return ev.target === root || ev.target === view || ev.target === disksEl || ev.target === iconsEl; }
     root.addEventListener('pointerdown', function (ev) {
@@ -5042,15 +5306,26 @@
     window.addEventListener('dragend', dragOff);
     window.addEventListener('blur', function () { closeMenus(); });
 
-    // On first open, present a sign-in screen: nothing is mounted for an anonymous client (only a signed-in
-    // principal has a home), so the desktop opens straight into the sign-in dialog. Cancelling it proceeds
-    // anonymously -- the user can still sign in later from the root menu.
+    // On first open, present a sign-in screen: nothing is mounted for an anonymous client (only a signed-in principal
+    // has a home), so the desktop opens into the login window -- unless the server allows anonymous access, in which
+    // case it is skipped and the desktop opens straight in. The login has no Cancel and a failed sign-in returns to it;
+    // the pager and the home appear only once signed in.
     (async function start() {
       if (isTLS(CD.origin + '/') && !CD.auth) {
-        try { await readCapabilities(); } catch (e) { /* the sign-in dialog falls back to offering both methods */ }
-        await signInDialog('Sign in to your CDMI desktop.');
+        var caps = null;
+        try { caps = await readCapabilities(); } catch (e) { /* unreadable: offer login, which falls back to both methods */ }
+        // Skip the sign-in window when the server, having answered its capabilities, advertises no auth method cvwm can
+        // use -- cdmi_authentication_methods missing, empty, or naming only methods it does not do: that server permits
+        // anonymous access, so open straight in. When capabilities could not be read at all we cannot tell, so the login
+        // still shows (a 401 during discovery is quiet and would not re-prompt). A protected resource reached later
+        // still prompts through the normal 401 path.
+        var m = caps && caps.cdmi_authentication_methods;
+        var offersAuth = caps === null || (Array.isArray(m) && m.some(function (x) { return x === 'basic' || x === 'bearer'; }));
+        if (offersAuth) promptLogin('Sign in to your CDMI desktop.');     // rescans internally (on success, or if dismissed)
+        else rescan();                                                    // anonymous-capable server: mount without a login
+      } else {
+        rescan();
       }
-      rescan();
     })();
   }
 

@@ -46,5 +46,11 @@
   "selected": "({n} selected)",
   "matchOne": " match",
   "matchMany": " matches",
-  "notText": "this object is not text"
+  "notText": "this object is not text",
+  "mHelp": "Help",
+  "mAbout": "About…",
+  "aboutTitle": "About Textile",
+  "version": "Version",
+  "aboutText": "A plain-text editor with syntax colouring, for cvwm.",
+  "ok": "OK"
 }

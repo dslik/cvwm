@@ -37,7 +37,7 @@ export function createEngine(cfg) {
   var QNAME = '.cvwm-query';
   var qcont = CONTAINER, qurl = qcont + QNAME;
   var bindingRoot = BASE;
-  var S = typeof cfg.S === 'function' ? cfg.S : function (id, fb) { var v = R && R.text('strings', id); return v == null ? fb : v; };
+  var S = typeof cfg.S === 'function' ? cfg.S : function (id, vars) { var v = R && R.text('strings', id); if (v == null) return id; if (vars) for (var k in vars) v = v.split('{' + k + '}').join(vars[k]); return v; };
 
   var COLS = '34px minmax(160px,1fr) 120px 78px minmax(120px,1.3fr)';   // match | Name | Kind | Size | Location
   var ENGINE_CSS =
@@ -87,11 +87,11 @@ export function createEngine(cfg) {
   function isContainer(r) { return /cdmi-container/.test(r.objectType || '') || /\/$/.test(r.objectName || ''); }
   function isQueue(r) { return /cdmi-queue/.test(r.objectType || ''); }
   function kindOf(r) {
-    if (isContainer(r)) return S('kind-container', 'Container');
-    if (isQueue(r)) return S('kind-queue', 'Queue');
+    if (isContainer(r)) return S('kind-container');
+    if (isQueue(r)) return S('kind-queue');
     var n = (r.objectName || ''), dot = n.lastIndexOf('.');
-    if (dot > 0) return n.slice(dot + 1).toUpperCase() + S('kind-file-suffix', ' file');
-    return S('kind-data', 'Data object');
+    if (dot > 0) return n.slice(dot + 1).toUpperCase() + S('kind-file-suffix');
+    return S('kind-data');
   }
   function human(bytes) {
     var n = +bytes; if (!isFinite(n) || n < 0) return '';
@@ -131,14 +131,14 @@ export function createEngine(cfg) {
   var res = el('div', 'res');
   var head = el('div', 'lhead');
   head.appendChild(el('div', '', ' '));
-  head.appendChild(el('div', '', S('col-name', 'Name')));
-  head.appendChild(el('div', '', S('col-kind', 'Kind')));
-  head.appendChild(el('div', 'num', S('col-size', 'Size')));
-  head.appendChild(el('div', '', S('col-location', 'Location')));
+  head.appendChild(el('div', '', S('col-name')));
+  head.appendChild(el('div', '', S('col-kind')));
+  head.appendChild(el('div', 'num', S('col-size')));
+  head.appendChild(el('div', '', S('col-location')));
   var rowsEl = el('div', 'rows');
   res.appendChild(head); res.appendChild(rowsEl);
   var foot = el('div', 'foot');
-  var cntEl = el('span', 'cnt', S('ready', 'Ready')); var pathEl = el('span', 'path', ''); var stEl = el('span', 'st', '');
+  var cntEl = el('span', 'cnt', S('ready')); var pathEl = el('span', 'path', ''); var stEl = el('span', 'st', '');
   foot.appendChild(cntEl); foot.appendChild(pathEl); foot.appendChild(stEl);
   wrap.appendChild(res); wrap.appendChild(foot);
 
@@ -184,12 +184,12 @@ export function createEngine(cfg) {
   async function run(scope, scopeTerms) {
     terms = Array.isArray(scopeTerms) ? scopeTerms : [];
     if (polling) { clearTimeout(polling); polling = null; }
-    if (!scope || !scope.length) { setStatus('err', S('add-condition', 'add a condition')); cntEl.textContent = S('nothing-to-search', 'Nothing to search for'); return; }
-    rowsEl.textContent = ''; lastResults = []; pathEl.textContent = ''; cntEl.textContent = S('searching', 'Searching…'); setStatus('run', S('st-searching', '● searching'));
+    if (!scope || !scope.length) { setStatus('err', S('add-condition')); cntEl.textContent = S('nothing-to-search'); return; }
+    rowsEl.textContent = ''; lastResults = []; pathEl.textContent = ''; cntEl.textContent = S('searching'); setStatus('run', S('st-searching'));
     onBusy(true);
     await deleteQueue();
     var r = await createQueue(scope);
-    if (!r.ok) { onBusy(false); setStatus('err', '● ' + (await failText(r))); cntEl.textContent = S('query-not-created', 'Query not created'); return; }
+    if (!r.ok) { onBusy(false); setStatus('err', '● ' + (await failText(r))); cntEl.textContent = S('query-not-created'); return; }
     await deriveBindingRoot();
     poll(Date.now() + 30000);
   }
@@ -202,11 +202,11 @@ export function createEngine(cfg) {
     render(Array.isArray(q.value) ? q.value : []);
     if (status === 'Current' || status === 'Halted' || status === 'Error' || Date.now() > deadline) {
       onBusy(false); polling = null;
-      if (status === 'Error') setStatus('err', S('st-error', '● query error'));
-      else if (status === 'Halted') setStatus('ok', S('st-stopped', '● stopped'));
-      else if (Date.now() > deadline && status !== 'Current') setStatus('err', S('st-timeout', '● timed out'));
-      else setStatus('ok', S('st-complete', '● complete'));
-      cntEl.textContent = lastResults.length + (lastResults.length === 1 ? S('found-one', ' item found') : S('found-many', ' items found'));
+      if (status === 'Error') setStatus('err', S('st-error'));
+      else if (status === 'Halted') setStatus('ok', S('st-stopped'));
+      else if (Date.now() > deadline && status !== 'Current') setStatus('err', S('st-timeout'));
+      else setStatus('ok', S('st-complete'));
+      cntEl.textContent = lastResults.length + (lastResults.length === 1 ? S('found-one') : S('found-many'));
       return;
     }
     polling = setTimeout(function () { poll(deadline); }, 300);
@@ -219,9 +219,9 @@ export function createEngine(cfg) {
     reps.forEach(function (r) { r.__rel = relevance(r); });
     reps.sort(function (a, b) { return b.__rel - a.__rel; });
     lastResults = reps;
-    cntEl.textContent = reps.length + (reps.length === 1 ? S('found-one', ' item found') : S('found-many', ' items found'));
+    cntEl.textContent = reps.length + (reps.length === 1 ? S('found-one') : S('found-many'));
     rowsEl.textContent = ''; selectedRow = null;
-    if (!reps.length) { rowsEl.appendChild(el('div', 'empty', S('no-matches', 'No matching objects.'))); return; }
+    if (!reps.length) { rowsEl.appendChild(el('div', 'empty', S('no-matches'))); return; }
     reps.forEach(function (r) {
       var url = urlOf(r);
       var row = el('div', 'item');
@@ -230,7 +230,7 @@ export function createEngine(cfg) {
       row.appendChild(el('span', '', kindOf(r)));
       row.appendChild(el('span', 'num', isContainer(r) ? '' : human(r.metadata && r.metadata.cdmi_size)));
       row.appendChild(el('span', 'loc', r.parentURI || '/'));
-      row.onclick = function () { if (selectedRow) selectedRow.classList.remove('sel'); selectedRow = row; row.classList.add('sel'); pathEl.textContent = (r.parentURI || '/') + (r.objectName || '') + S('dblclick-hint', '  ·  double-click to open'); };
+      row.onclick = function () { if (selectedRow) selectedRow.classList.remove('sel'); selectedRow = row; row.classList.add('sel'); pathEl.textContent = (r.parentURI || '/') + (r.objectName || '') + S('dblclick-hint'); };
       row.ondblclick = function () { try { if (D.open) D.open(url); } catch (e) {} };
       rowsEl.appendChild(row);
     });

@@ -10,7 +10,7 @@ base URI, each command directory under bin/ one under /bin/, and each under dev/
 UTF-8, anything else as base64. --desktop NAME also stores cvwm.js and index.html in a container of that name, for a server
 that serves its objects to browsers through an HTTP export. Only https: base URIs are accepted. Uses nothing outside the Python standard library.
 """
-import argparse, base64, json, mimetypes, os, ssl, sys, time, urllib.error, urllib.parse, urllib.request
+import argparse, base64, json, mimetypes, os, re, ssl, sys, time, urllib.error, urllib.parse, urllib.request
 mimetypes.add_type("image/svg+xml", ".svg")   # so an index.svg icon is stored with the right media type on any host
 
 # Applications are grouped into sub-containers of apps/: the CDMI applications under apps/cdmi/, the general utilities
@@ -19,7 +19,7 @@ CDMI_APPS = ["capabilities", "domains", "namespaces", "postcdmi", "queues", "rel
 UTILS_APPS = ["console", "xterm", "capture", "framer"]
 APPS = ["earthworm", "textile", "xclock", "mcpinspector", "mdviewer", "fontviewer"] + UTILS_APPS + CDMI_APPS
 BIN = ["ls", "pwd", "cat", "head", "hexdump", "stat", "caps", "tree", "df", "echo", "open", "which", "nc", "ssh", "zip", "unzip"]
-CONTROL_PANELS = ["locale", "apps"]   # control panels, installed into /control_panels/ and imported into each home like apps
+CONTROL_PANELS = ["locale", "apps", "certificates"]   # control panels, installed into /control_panels/ and imported into each home like apps
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Test commands are optional and not part of a release package: whatever directories exist under dev/tests/ (none in a
 # release) are offered to --tests, so the installer runs cleanly whether or not they are present.
@@ -30,6 +30,13 @@ TESTS = sorted(d for d in os.listdir(_TESTS_DIR) if os.path.isdir(os.path.join(_
 # (no checked-in .cdmi to drift from it). The serialization logic is shared with tools/package-app.py and update-cvwm.py.
 sys.path.insert(0, os.path.join(HERE, "tools"))
 from cdmi_serialize import serialize
+
+
+def cvwm_version():
+    """The cvwm version this installer stamps into each app's rsrc/manifest.json, from cvwm.js beside this script.
+    The desktop refuses to run an app that declares nothing (see docs/app-compatibility.md), so this must be present."""
+    m = re.search(r"cvwm version:\s*([0-9]+\.[0-9]+\.[0-9]+)", open(os.path.join(HERE, "cvwm.js"), encoding="utf-8").read())
+    return m.group(1) if m else None
 
 
 def app_job(a):
@@ -150,13 +157,17 @@ def main():
         # index.js/index.png make the desktop container show a "this provides the desktop" stub if it is ever opened
         # as an application (a container with an index.js), rather than trying to run the window manager in a window.
         jobs.append((args.desktop.strip("/"), HERE, ["cvwm.js", "index.html", "index.js", "index.png"]))
+    # The cvwm version stamped into every app's rsrc/manifest.json so the desktop's compatibility gate can read it.
+    built = cvwm_version()
+    if not built:
+        raise SystemExit("cannot read this package's cvwm version from cvwm.js; refusing to install unstamped apps")
     for app, folder, only in jobs:
         # An application (or a control panel, which can carry a resource fork) is serialized from its source and
         # installed with one deserialize, which recreates the container and everything in it, its rsrc/ fork included.
         # The desktop, bin and tests jobs are not serialized: they write files directly.
         if app.startswith("apps/") or app.startswith("control_panels/"):
             name = app.split("/")[-1]
-            blob = serialize(folder, name, is_fork=False)
+            blob = serialize(folder, name, is_fork=False, built_against=built)
             deserialize_package(base, app, blob, name + ".cdmi", headers, context)
             continue
         is_desktop = bool(args.desktop) and app == args.desktop.strip("/")
@@ -188,6 +199,14 @@ def main():
             if os.path.isdir(sys_src):
                 blob = serialize(sys_src, "rsrc", is_fork=True)
                 deserialize_package(base, app + "/rsrc", blob, "rsrc.cdmi", headers, context)
+            else:
+                put(base + app + "/rsrc/", "application/cdmi-container", {"metadata": {}}, headers, context)
+            # Stamp the desktop like every other app so it passes the compatibility gate (appCompat reads
+            # rsrc/manifest.json builtAgainst). The desktop is written file-by-file, not serialized, so the
+            # serializer's stamp never runs for it -- write the manifest here, with this package's version.
+            put(base + app + "/rsrc/manifest.json", "application/cdmi-object",
+                {"mimetype": "application/json", "metadata": {}, "valuetransferencoding": "utf-8",
+                 "value": json.dumps({"builtAgainst": built}, indent=2)}, headers, context)
     print("Done. Reload the desktop, or choose Rescan namespaces from its root menu.")
 
 

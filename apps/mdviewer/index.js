@@ -17,47 +17,12 @@
   // Resources: the app's own fork (CTX.rsrc), optional. Absent (a classic install) => every lookup falls back to the
   // built-in default. S() reads a string; the stylesheet is pulled where present.
   var R = CTX.rsrc || null;
-  function S(id, fb) { var v = R && R.text('strings', id); return v == null ? fb : v; }
+  function S(id, vars) { var v = R && R.text('strings', id); if (v == null) return id; if (vars) for (var k in vars) v = v.split('{' + k + '}').join(vars[k]); return v; }
   var T_OBJECT = 'application/cdmi-object';
 
   /* ----------------------------------------------------------------- styles (GitHub markdown, light + dark) */
   var style = document.createElement('style');
-  var DEFAULT_CSS =
-    ':root{--fg:#1f2328;--muted:#59636e;--bg:#ffffff;--border:#d1d9e0;--code-bg:#eff1f3;--code-fg:#1f2328;' +
-    '--quote-fg:#59636e;--link:#0969da;--accent:#0969da;--table-alt:#f6f8fa;--hr:#d1d9e0;}' +
-    '@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--fg:#e6edf3;--muted:#9198a1;--bg:#0d1117;' +
-    '--border:#3d444d;--code-bg:#151b23;--code-fg:#e6edf3;--quote-fg:#9198a1;--link:#4493f8;--accent:#4493f8;--table-alt:#151b23;--hr:#3d444d;}}' +
-    'html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);}' +
-    'body{font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,"Liberation Sans",sans-serif;}' +
-    '#bar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg);' +
-    'border-bottom:1px solid var(--border);}' +
-    '#bar .name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;font-size:14px;}' +
-    '#bar button{height:26px;padding:0 10px;font-size:13px;background:var(--code-bg);color:var(--fg);border:1px solid var(--border);border-radius:6px;cursor:pointer;}' +
-    '#bar button:hover{border-color:var(--muted);}' +
-    '#doc{max-width:900px;margin:0 auto;padding:28px 44px 80px;}' +
-    '.empty{color:var(--muted);text-align:center;padding:80px 20px;}' +
-    /* markdown elements */
-    '.md h1,.md h2,.md h3,.md h4,.md h5,.md h6{margin:24px 0 16px;font-weight:600;line-height:1.25;}' +
-    '.md h1{font-size:2em;padding-bottom:.3em;border-bottom:1px solid var(--border);}' +
-    '.md h2{font-size:1.5em;padding-bottom:.3em;border-bottom:1px solid var(--border);}' +
-    '.md h3{font-size:1.25em;}.md h4{font-size:1em;}.md h5{font-size:.875em;}.md h6{font-size:.85em;color:var(--muted);}' +
-    '.md p{margin:0 0 16px;}.md a{color:var(--link);text-decoration:none;}.md a:hover{text-decoration:underline;}' +
-    '.md strong{font-weight:600;}.md del{color:var(--muted);}' +
-    '.md code{font:85% ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;' +
-    'background:var(--code-bg);padding:.2em .4em;border-radius:6px;}' +
-    '.md pre{background:var(--code-bg);padding:16px;border-radius:6px;overflow:auto;margin:0 0 16px;}' +
-    '.md pre code{background:none;padding:0;font-size:85%;color:var(--code-fg);white-space:pre;}' +
-    '.md blockquote{margin:0 0 16px;padding:0 1em;color:var(--quote-fg);border-left:.25em solid var(--border);}' +
-    '.md blockquote>:last-child{margin-bottom:0;}' +
-    '.md ul,.md ol{margin:0 0 16px;padding-left:2em;}.md li{margin:.25em 0;}.md li>ul,.md li>ol{margin:.25em 0;}' +
-    '.md li.task{list-style:none;margin-left:-1.4em;}.md li.task input{margin:0 .4em 0 0;vertical-align:middle;}' +
-    '.md table{border-collapse:collapse;margin:0 0 16px;display:block;width:max-content;max-width:100%;overflow:auto;}' +
-    '.md th,.md td{border:1px solid var(--border);padding:6px 13px;}.md tr:nth-child(2n){background:var(--table-alt);}' +
-    '.md th{font-weight:600;}' +
-    '.md hr{height:1px;border:0;background:var(--hr);margin:24px 0;}' +
-    '.md img{max-width:100%;box-sizing:border-box;}' +
-    '.md kbd{font:85% ui-monospace,monospace;background:var(--code-bg);border:1px solid var(--border);border-radius:6px;padding:.1em .4em;box-shadow:inset 0 -1px 0 var(--border);}';
-  style.textContent = (R && R.text('styles', 'mdviewer')) || DEFAULT_CSS;
+  style.textContent = R.text('styles', 'mdviewer');
   document.head.appendChild(style);
 
   function el(tag, props, kids) {
@@ -67,14 +32,14 @@
     return e;
   }
 
-  var nameEl = el('span', { class: 'name', text: S('title', 'mdviewer') });
-  var openBtn = el('button', { type: 'button', title: S('openTitle', 'Open a Markdown object from a disk') }, [document.createTextNode(S('open', 'Open\u2026'))]);
+  var nameEl = el('span', { class: 'name', text: S('title') });
+  var openBtn = el('button', { type: 'button', title: S('openTitle') }, [document.createTextNode(S('open'))]);
   var bar = el('div', { id: 'bar' }, [nameEl, openBtn]);
   var doc = el('div', { id: 'doc', class: 'md' });
   document.body.appendChild(bar); document.body.appendChild(doc);
   if (CTX.resize) CTX.resize(900, 720);
 
-  var NAME = S('title', 'mdviewer');
+  var NAME = S('title');
   var showingDoc = false;
   function showEmpty() {
     showingDoc = false;
@@ -84,8 +49,8 @@
     // a dragged cvwm object lands on it directly. Once a document loads we call desktop.showApp and the frame shows.
     if (CTX.desktop && CTX.desktop.dropPane && CTX.id !== undefined) {
       CTX.desktop.dropPane(CTX.id, {
-        label: S('openFile', 'Open a Markdown file'),
-        openLabel: S('open', 'Open\u2026'),
+        label: S('openFile'),
+        openLabel: S('open'),
         onOpen: openPicker,
         onFile: function (f) { var r = new FileReader(); r.onload = function () { render(String(r.result), f.name); }; r.readAsText(f); },
         onObject: function (url) { if (/^https:/i.test(url)) loadCdmi(url); }
@@ -114,14 +79,14 @@
     doc.className = 'md';
     doc.innerHTML = mdToHtml(text);
     doc.scrollTop = 0; window.scrollTo(0, 0);
-    setTitle(title || S('document', 'document'));
+    setTitle(title || S('document'));
   }
 
   /* Open uses the desktop's common picker (a cvwm FVWM-styled window), filtered to Markdown objects. */
   function openPicker() {
     if (CTX.desktop && CTX.desktop.pickObject) {
       CTX.desktop.pickObject({
-        title: S('openFile', 'Open a Markdown file'),
+        title: S('openFile'),
         startURI: CTX.baseURI || CTX.homeURI || null,
         filter: function (name) { return /\.(md|markdown|mdown|mkd)$/i.test(name); }
       }).then(function (url) { if (url) loadCdmi(url); });
@@ -135,18 +100,18 @@
     try {
       var h = { Accept: T_OBJECT }; for (var k in HEADERS) h[k] = HEADERS[k];
       var res = await fetch(clean + '?objectName&mimetype&valuetransferencoding&value', { headers: h, redirect: 'follow', credentials: 'same-origin', cache: 'no-store' });
-      if (res.url && !/^https:/i.test(res.url)) throw new Error(S('redirectNonHttps', 'redirected to a non-https URI'));
+      if (res.url && !/^https:/i.test(res.url)) throw new Error(S('redirectNonHttps'));
       if (!res.ok) throw new Error('HTTP ' + res.status);
       var rep = await res.json();
       var enc = rep.valuetransferencoding || 'utf-8', v = rep.value || '', text;
-      if (enc === 'base64') { try { text = new TextDecoder('utf-8', { fatal: true }).decode(b64(v)); } catch (e) { throw new Error(S('notUtf8', 'this object is not UTF-8 text')); } }
+      if (enc === 'base64') { try { text = new TextDecoder('utf-8', { fatal: true }).decode(b64(v)); } catch (e) { throw new Error(S('notUtf8')); } }
       else if (enc === 'json') text = JSON.stringify(v, null, 2);
       else text = v;
-      render(text, rep.objectName || clean.split('/').pop() || S('document', 'document'));
+      render(text, rep.objectName || clean.split('/').pop() || S('document'));
     } catch (e) {
       doc.className = 'md';
       doc.innerHTML = '';
-      doc.appendChild(el('div', { class: 'empty', html: escapeHtml(S('couldNotOpen', 'Could not open')) + ' <code>' + escapeHtml(clean) + '</code><br><br>' + escapeHtml(String(e.message || e)) }));
+      doc.appendChild(el('div', { class: 'empty', html: escapeHtml(S('couldNotOpen')) + ' <code>' + escapeHtml(clean) + '</code><br><br>' + escapeHtml(String(e.message || e)) }));
       setTitle(NAME);
     }
   }

@@ -13,7 +13,7 @@
   var D = CTX.desktop || {};
   var R = CTX.rsrc || null;
   var HDRS = CTX.headers || {};
-  function S(id, fb) { var v = R && R.text('strings', id); return v == null ? fb : v; }
+  function S(id, vars) { var v = R && R.text('strings', id); if (v == null) return id; if (vars) for (var k in vars) v = v.split('{' + k + '}').join(vars[k]); return v; }
   function slash(u) { return u && !/\/$/.test(u) ? u + '/' : u; }
   var CONTAINER = slash(CTX.containerURI || CTX.baseURI || '');
   var BASE = slash(CTX.baseURI || CONTAINER);
@@ -35,7 +35,7 @@
   var title = '';
   var bar = document.createElement('div'); bar.className = 'sfbar';
   var tEl = document.createElement('span'); tEl.className = 't';
-  var refresh = document.createElement('button'); refresh.type = 'button'; refresh.textContent = S('refresh', '↻ Refresh');
+  var refresh = document.createElement('button'); refresh.type = 'button'; refresh.textContent = S('refresh');
   bar.appendChild(tEl); bar.appendChild(refresh);
   document.body.appendChild(bar);
 
@@ -66,16 +66,16 @@
       if (typeof q === 'string') { try { q = JSON.parse(q); } catch (e) {} }
       scope = Array.isArray(q) ? q : [];
     } catch (e) {}
-    if (CTX.setTitle) CTX.setTitle(title || S('sf-title', 'smart folder'));
-    tEl.textContent = title || S('sf-title', 'smart folder');
-    if (!(R && R.module)) { var m = document.createElement('div'); m.className = 'sfmsg'; m.textContent = S('no-engine', 'The query engine resource (code/engine) is missing.'); document.body.appendChild(m); return; }
+    if (CTX.setTitle) CTX.setTitle(title || S('sf-title'));
+    tEl.textContent = title || S('sf-title');
+    if (!(R && R.module)) { var m = document.createElement('div'); m.className = 'sfmsg'; m.textContent = S('no-engine'); document.body.appendChild(m); return; }
     try {
       var mod = await R.module('code', 'engine');
       engine = (mod.createEngine || mod.default)({ headers: HDRS, desktop: D, rsrc: R, container: CONTAINER, base: BASE, home: HOME, S: S });
       document.body.appendChild(engine.el);
       run();
     } catch (e) {
-      var m2 = document.createElement('div'); m2.className = 'sfmsg'; m2.textContent = (S('no-engine', 'The query engine resource (code/engine) is missing.')) + ' ' + (e && e.message || e); document.body.appendChild(m2);
+      var m2 = document.createElement('div'); m2.className = 'sfmsg'; m2.textContent = (S('no-engine')) + ' ' + (e && e.message || e); document.body.appendChild(m2);
     }
   }
 

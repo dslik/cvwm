@@ -24,8 +24,8 @@
   // Resources: the app's own fork (CTX.rsrc), optional. Absent (a classic install) => every lookup falls back to the
   // built-in default. S() reads a string with optional {token} substitution; the stylesheet is pulled where present.
   var R = CTX.rsrc || null;
-  function S(id, fb, vars) {
-    var v = R && R.text('strings', id); if (v == null) v = fb;
+  function S(id, vars) {
+    var v = R && R.text('strings', id); if (v == null) return id;
     if (vars) for (var k in vars) v = v.split('{' + k + '}').join(vars[k]);
     return v;
   }
@@ -33,58 +33,15 @@
   var T_OBJECT = 'application/cdmi-object', T_CONTAINER = 'application/cdmi-container';
   var LIMIT = 1024 * 1024;                          // no colouring past this many characters
 
-  var file = { url: null, name: S('untitled', 'untitled'), dir: null, encoding: 'utf-8', mime: 'text/plain' };
+  var file = { url: null, name: S('untitled'), dir: null, encoding: 'utf-8', mime: 'text/plain' };
   var saved = '', syntax = 'Plain Text', checkTimer = 0;
-  var NAME = S('title', 'Textile');
+  var NAME = S('title');
 
   /* ---------------------------------------------------------------- interface */
 
   var FONT = '13px/19px "DejaVu Sans Mono","Liberation Mono",Menlo,Consolas,monospace';
   var style = document.createElement('style');
-  var DEFAULT_CSS =
-    /* HIG tokens: light (platinum) by default, dark under body.dark; the shared cvwm.dark signal drives both. */
-    ':root{--std:#60a0c0;--hi:#c06077;--grey:#bfbfbf;--lt:rgba(255,255,255,.6);--dk:rgba(0,0,0,.55);' +
-      '--sans:Helvetica,"Nimbus Sans","Liberation Sans",Arial,sans-serif;--mono:"DejaVu Sans Mono","Liberation Mono",Menlo,Consolas,monospace;' +
-      '--fg:#000;--fg2:#333;--dim:#555;--field:#fff;--on:#e8e8e8;--band:#eef3f7;--selband:rgba(96,160,192,.38);--sb-face:#bfbfbf;--sb-trough:#9a9a9a;' +
-      '--syn-key:#0a3069;--syn-str:#0a7d33;--syn-num:#8250df;--syn-const:#8250df;--syn-kw:#cf222e;--syn-storage:#0550ae;--syn-comment:#6e7781;--syn-fn:#116329;--syn-call:#0550ae;--syn-op:#cf222e;--syn-re:#0a7d33;--syn-bad:#cf222e}' +
-    'body.dark{--std:#2c3d47;--hi:#3a4e59;--grey:#333b41;--lt:rgba(255,255,255,.16);--dk:rgba(0,0,0,.6);' +
-      '--fg:#e8edf1;--fg2:#c9d1d8;--dim:#8a929a;--field:#15191c;--on:#1f262b;--band:#222c35;--selband:rgba(120,118,100,.5);--sb-face:#333b41;--sb-trough:#23292e;' +
-      '--syn-key:#66d9ef;--syn-str:#e6db74;--syn-num:#ae81ff;--syn-const:#ae81ff;--syn-kw:#f92672;--syn-storage:#66d9ef;--syn-comment:#75715e;--syn-fn:#a6e22e;--syn-call:#66d9ef;--syn-op:#f92672;--syn-re:#e6db74;--syn-bad:#f92672;color-scheme:dark}' +
-    'html,body{margin:0;height:100%}' +
-    'body{display:flex;flex-direction:column;background:var(--grey);color:var(--fg);font:13px var(--sans);overflow:hidden;cursor:default}' +
-    /* menu bar */
-    '#menubar{display:flex;align-items:center;height:26px;flex:none;padding:0 2px;background:var(--grey);border-bottom:1px solid var(--dk);position:relative;z-index:10;user-select:none;-webkit-user-select:none}' +
-    '#menubar>span{height:22px;line-height:20px;padding:0 10px;border:1px solid transparent;font:13px var(--sans);color:var(--fg);white-space:nowrap}' +
-    '#menubar>span.open{background:var(--hi);border-color:var(--lt) var(--dk) var(--dk) var(--lt)}' +
-    '.menu{position:fixed;z-index:30;min-width:200px;padding:2px;background:var(--grey);border:2px solid;border-color:var(--lt) var(--dk) var(--dk) var(--lt);display:flex;flex-direction:column;font:13px var(--sans);color:var(--fg);user-select:none;-webkit-user-select:none}' +
-    '.menu div{position:relative;display:flex;justify-content:space-between;align-items:center;gap:20px;height:24px;padding:0 10px 0 24px;border:1px solid transparent;white-space:nowrap}' +
-    '.menu div:hover{background:var(--hi);border-color:var(--lt) var(--dk) var(--dk) var(--lt)}' +
-    '.menu div.off{color:var(--dim)}.menu div.off:hover{background:none;border-color:transparent}' +
-    '.menu div .ck{position:absolute;left:8px;top:0;line-height:22px}.menu div .key{color:var(--fg2);font-size:12px}.menu div.off .key{color:var(--dim)}' +
-    '.menu hr{border:0;border-top:1px solid var(--dk);border-bottom:1px solid var(--lt);margin:3px 2px}' +
-    /* editor */
-    '#ed{position:relative;flex:1;min-height:0;display:flex;background:var(--field)}' +
-    '#gutter{flex:none;min-width:40px;padding:4px 10px 60px 12px;box-sizing:border-box;text-align:right;color:var(--dim);font:' + FONT + ';white-space:pre;overflow:hidden;user-select:none;-webkit-user-select:none;background:var(--grey);border-right:1px solid var(--dk)}' +
-    '#area{position:relative;flex:1;min-width:0;overflow:hidden}' +
-    '#line{position:absolute;left:0;right:0;height:19px;background:var(--band);pointer-events:none}' +
-    '#paint,#text{position:absolute;inset:0;margin:0;border:0;padding:4px 8px;box-sizing:border-box;font:' + FONT + ';tab-size:4;-moz-tab-size:4;white-space:pre;letter-spacing:0}' +
-    '#paint{color:var(--fg);pointer-events:none;right:auto;bottom:auto;min-width:100%;overflow:visible;will-change:transform}' +
-    '#measure{position:absolute;left:0;top:0;visibility:hidden;pointer-events:none;margin:0;padding:4px 8px;box-sizing:border-box;font:' + FONT + ';tab-size:4;-moz-tab-size:4;white-space:pre-wrap;overflow-wrap:break-word}' +
-    'body.wrap #paint,body.wrap #text{white-space:pre-wrap;overflow-wrap:break-word;word-break:normal}body.wrap #paint{min-width:0}body.wrap #text{overflow-x:hidden}' +
-    '#gutter div{height:19px}' +
-    '#text{width:100%;height:100%;resize:none;outline:none;background:transparent;color:var(--fg);caret-color:var(--fg);overflow:auto}' +
-    '#text.painted{color:transparent}#text::selection{background:var(--selband)}#text.painted::selection{color:transparent;background:var(--selband)}' +
-    '#paint .k{color:var(--syn-key)}#paint .s{color:var(--syn-str)}#paint .n{color:var(--syn-num)}#paint .c{color:var(--syn-const)}#paint .p{color:var(--fg)}#paint .x{color:var(--syn-bad);text-decoration:underline wavy}' +
-    '#paint .kw{color:var(--syn-kw)}#paint .st{color:var(--syn-storage);font-style:italic}#paint .cm{color:var(--syn-comment)}#paint .fn{color:var(--syn-fn)}#paint .cl{color:var(--syn-call)}#paint .op{color:var(--syn-op)}#paint .re{color:var(--syn-re)}' +
-    /* find */
-    '#find{display:none;align-items:center;gap:6px;flex:none;background:var(--grey);padding:5px 8px;border-top:1px solid var(--dk)}#find.on{display:flex}' +
-    '#find input{flex:1;min-width:0;height:24px;padding:0 6px;background:var(--field);color:var(--fg);font:' + FONT + ';border:2px solid;border-color:var(--dk) var(--lt) var(--lt) var(--dk)}#find input:focus{outline:1px solid var(--fg)}' +
-    '#find .m{color:var(--dim);min-width:80px;text-align:right;font:12px var(--sans)}' +
-    '#find button{min-width:0;height:24px;padding:0 10px;background:var(--grey);font:700 12px var(--sans);color:var(--fg);border:2px solid;border-color:var(--lt) var(--dk) var(--dk) var(--lt)}#find button:active{border-color:var(--dk) var(--lt) var(--lt) var(--dk)}' +
-    /* status bar */
-    '#status{height:24px;flex:none;display:flex;align-items:center;gap:16px;padding:0 10px;background:var(--grey);color:var(--fg);font:11px var(--mono);white-space:nowrap;overflow:hidden;border-top:1px solid var(--lt)}' +
-    '#status .nm{font-weight:700}#status .msg{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}#status .bad{color:#c0202c}#status .good{color:#1a7f37}body.dark #status .bad{color:#ff8a8a}body.dark #status .good{color:#7ec98f}';
-  style.textContent = (R && R.text('styles', 'textile')) || DEFAULT_CSS;
+  style.textContent = R.text('styles', 'textile');
   document.head.appendChild(style);
 
   function el(tag, props, text) { var e = document.createElement(tag); for (var k in (props || {})) e.setAttribute(k, props[k]); if (text !== undefined) e.textContent = text; return e; }
@@ -94,9 +51,9 @@
   var menubar = el('div', { id: 'menubar' });
   var tabName = el('span', { class: 'nm' }, file.name);            // the file name, shown at the left of the status bar
   var gutter = el('div', { id: 'gutter', 'aria-hidden': 'true' }), area = el('div', { id: 'area' }), band = el('div', { id: 'line' }), paint = el('pre', { id: 'paint', 'aria-hidden': 'true' });
-  var text = el('textarea', { id: 'text', wrap: 'off', spellcheck: 'false', autocomplete: 'off', autocapitalize: 'off', 'aria-label': S('text', 'Text') });
-  var find = el('div', { id: 'find' }), fIn = el('input', { type: 'text', 'aria-label': S('findLabel', 'Find'), placeholder: S('findLabel', 'Find'), spellcheck: 'false' }), fCount = el('span', { class: 'm' }), fPrev = btn(S('prev', 'Prev')), fNext = btn(S('next', 'Next')), fClose = btn('\u00D7', S('close', 'Close (Esc)'));
-  var sPos = el('span', {}, S('lineCol', 'Line 1, Column 1', { ln: '1', col: '1' })), sMsg = el('span', { class: 'msg', role: 'status' }), sWrap = el('span', {}, S('wrapOff', 'Wrap: Off')), sTab = el('span', {}, S('tabSize', 'Tab Size: 4')), sEnc = el('span', {}, S('enc', 'UTF-8')), sSyn = el('span', {}, S('synPlain', 'Plain Text'));
+  var text = el('textarea', { id: 'text', wrap: 'off', spellcheck: 'false', autocomplete: 'off', autocapitalize: 'off', 'aria-label': S('text') });
+  var find = el('div', { id: 'find' }), fIn = el('input', { type: 'text', 'aria-label': S('findLabel'), placeholder: S('findLabel'), spellcheck: 'false' }), fCount = el('span', { class: 'm' }), fPrev = btn(S('prev')), fNext = btn(S('next')), fClose = btn('\u00D7', S('close'));
+  var sPos = el('span', {}, S('lineCol', { ln: '1', col: '1' })), sMsg = el('span', { class: 'msg', role: 'status' }), sWrap = el('span', {}, S('wrapOff')), sTab = el('span', {}, S('tabSize')), sEnc = el('span', {}, S('enc')), sSyn = el('span', {}, S('synPlain'));
   add(find, fIn, fCount, fPrev, fNext, fClose);
   var measure = el('div', { id: 'measure', 'aria-hidden': 'true' });
   add(area, band, paint, measure, text);
@@ -141,19 +98,21 @@
 
   function menuDef() {
     return [
-      [S('mFile', 'File'), [
-        { label: S('mNew', 'New'), key: 'Ctrl+N', action: function () { careful('new', function () { fresh(); }); } },
-        { label: S('mOpen', 'Open\u2026'), key: 'Ctrl+O', action: openViaPicker }, '-',
-        { label: S('mSave', 'Save'), key: 'Ctrl+S', action: function () { save(); } },
-        { label: S('mSaveAs', 'Save As\u2026'), key: 'Ctrl+Shift+S', action: saveAs }]],
-      [S('mEdit', 'Edit'), [
-        { label: S('mUndo', 'Undo'), key: 'Ctrl+Z', action: function () { text.focus(); try { document.execCommand('undo'); } catch (e) { /* no undo */ } repaint(); } },
-        { label: S('mRedo', 'Redo'), key: 'Ctrl+Y', action: function () { text.focus(); try { document.execCommand('redo'); } catch (e) { /* no redo */ } repaint(); } }, '-',
-        { label: S('mFind', 'Find\u2026'), key: 'Ctrl+F', action: function () { showFind('find'); } },
-        { label: S('mGoto', 'Go to Line\u2026'), key: 'Ctrl+G', action: function () { showFind('goto'); } }]],
-      [S('mView', 'View'), [
-        { label: S('mWrap', 'Wrap lines'), key: 'Alt+Z', checked: function () { return wrapped; }, action: function () { setWrap(!wrapped); text.focus(); } }, '-',
-        { label: S('mDark', 'Dark mode'), key: 'Ctrl+Shift+D', checked: isDark, action: function () { setDark(!isDark()); } }]]];
+      [S('mFile'), [
+        { label: S('mNew'), key: 'Ctrl+N', action: function () { careful('new', function () { fresh(); }); } },
+        { label: S('mOpen'), key: 'Ctrl+O', action: openViaPicker }, '-',
+        { label: S('mSave'), key: 'Ctrl+S', action: function () { save(); } },
+        { label: S('mSaveAs'), key: 'Ctrl+Shift+S', action: saveAs }]],
+      [S('mEdit'), [
+        { label: S('mUndo'), key: 'Ctrl+Z', action: function () { text.focus(); try { document.execCommand('undo'); } catch (e) { /* no undo */ } repaint(); } },
+        { label: S('mRedo'), key: 'Ctrl+Y', action: function () { text.focus(); try { document.execCommand('redo'); } catch (e) { /* no redo */ } repaint(); } }, '-',
+        { label: S('mFind'), key: 'Ctrl+F', action: function () { showFind('find'); } },
+        { label: S('mGoto'), key: 'Ctrl+G', action: function () { showFind('goto'); } }]],
+      [S('mView'), [
+        { label: S('mWrap'), key: 'Alt+Z', checked: function () { return wrapped; }, action: function () { setWrap(!wrapped); text.focus(); } }, '-',
+        { label: S('mDark'), key: 'Ctrl+Shift+D', checked: isDark, action: function () { setDark(!isDark()); } }]],
+      [S('mHelp'), [
+        { label: S('mAbout'), action: showAbout }]]];
   }
   menuDef().forEach(function (m, i) {
     var head = el('span', {}, m[0]);
@@ -161,6 +120,53 @@
     head.addEventListener('mouseenter', function () { if (openMenu && openMenu.head !== head) { var r = head.getBoundingClientRect(); showMenu(head, menuDef()[i][1], r.left, r.bottom); } });
     menubar.appendChild(head);
   });
+
+  /* ---------------------------------------------------------------- About box (docs/about-box-convention.md)
+
+     The shared cvwm app-About dialog: a veiled, desktop-framed box with the app's own icon, name and version. The icon
+     is CTX.iconURL -- the blob the desktop passes for this app's own container icon, the same image the file browser
+     shows -- so there is nothing to drift; if it is absent, the picture is dropped and the text starts at the left.
+     Built-in apps are not versioned on their own, so the version shown is the desktop's (CTX.cvwmVersion). */
+  function dialog(build) {
+    var veil = el('div', { class: 'veil' }), box = el('div', { class: 'dlg' }), done = false;
+    function finish() { if (done) return; done = true; veil.remove(); }
+    veil.addEventListener('mousedown', function (ev) { if (ev.target === veil) finish(); });
+    add(veil, add(el('div', { class: 'win' }), box));
+    document.body.appendChild(veil);
+    build(box, finish);
+    titleBar(box, finish);
+  }
+  function titleBar(box, finish) {
+    var h2 = box.querySelector('h2'); if (!h2 || h2.querySelector('.tt')) return;
+    var tt = el('span', { class: 'tt' }); while (h2.firstChild) tt.appendChild(h2.firstChild);
+    var wb = el('span', { class: 'wb', title: S('close') }); wb.appendChild(el('i'));
+    wb.addEventListener('click', finish);
+    h2.appendChild(wb); h2.appendChild(tt);
+  }
+  function showAbout() {
+    dialog(function (box, finish) {
+      box.classList.add('about');
+      box.appendChild(el('h2', {}, S('aboutTitle')));
+      var abody = el('div', { class: 'abody' });
+      if (CTX.iconURL) {
+        var pic = el('img', { class: 'appicon', alt: '', width: '64', height: '64', draggable: 'false' });
+        pic.addEventListener('error', function () { pic.remove(); });
+        pic.setAttribute('src', CTX.iconURL);
+        abody.appendChild(pic);
+      }
+      abody.appendChild(add(el('div'),
+        el('div', { class: 'aname' }, NAME),
+        el('div', { class: 'aver' }, S('version') + (CTX.cvwmVersion ? ' ' + CTX.cvwmVersion : '')),
+        el('div', { class: 'acopy' }, '© 2026 CVWM Project'),
+        el('p', {}, S('aboutText'))));
+      box.appendChild(abody);
+      var ok = el('button', { class: 'pri', type: 'button' }, S('ok'));
+      ok.addEventListener('click', finish);
+      box.appendChild(add(el('div', { class: 'row' }), ok));
+      box.addEventListener('keydown', function (ev) { if (ev.key === 'Escape' || ev.key === 'Enter') finish(); });
+      ok.focus();
+    });
+  }
 
   /* ---------------------------------------------------------------- colouring */
 
@@ -259,7 +265,7 @@
   }
   function setWrap(on) {
     wrapped = !!on; document.body.classList.toggle('wrap', wrapped); text.setAttribute('wrap', wrapped ? 'soft' : 'off');
-    sWrap.textContent = wrapped ? S('wrapOn', 'Wrap: On') : S('wrapOff', 'Wrap: Off');
+    sWrap.textContent = wrapped ? S('wrapOn') : S('wrapOff');
     try { localStorage.setItem('textile.wrap', wrapped ? '1' : '0'); } catch (e) { /* no storage; the choice lasts for this window */ }
     gutter.dataset.lines = ''; repaint(); reveal();
   }
@@ -287,7 +293,7 @@
     band.style.top = (4 + topOf(ln - 1) - text.scrollTop) + 'px'; band.style.height = heightOf(ln - 1) + 'px';
     band.style.display = text.selectionStart === text.selectionEnd ? '' : 'none';
     var sel = text.selectionEnd - text.selectionStart;
-    sPos.textContent = S('lineCol', 'Line {ln}, Column {col}', { ln: ln, col: col }) + (sel ? '  ' + S('selected', '({n} selected)', { n: sel }) : '');
+    sPos.textContent = S('lineCol', { ln: ln, col: col }) + (sel ? '  ' + S('selected', { n: sel }) : '');
   }
 
   /* Is it JSON? Says where it stops being, in the editor's own terms. */
@@ -296,18 +302,18 @@
     if (Date.now() < hold) { clearTimeout(checkTimer); checkTimer = setTimeout(check, hold - Date.now() + 20); return; }
     if (syntax !== 'JSON') { if (sMsg.dataset.kind === 'json') note('', 'json'); return; }
     var v = text.value; if (!v.trim()) return note('', 'json');
-    try { JSON.parse(v); note(S('validJson', 'Valid JSON'), 'json', 'good'); }
+    try { JSON.parse(v); note(S('validJson'), 'json', 'good'); }
     catch (e) {
       var m = /position (\d+)/.exec(e.message), at = '';
       if (m) { var upto = v.slice(0, +m[1]); at = ' (line ' + upto.split('\n').length + ', column ' + (upto.length - upto.lastIndexOf('\n')) + ')'; }
-      note(S('notValidJson', 'Not valid JSON: ') + e.message.replace(/^JSON\.parse: /, '').replace(/ in JSON at position \d+.*$/, '').replace(/ at position \d+.*$/, '') + at, 'json', 'bad');
+      note(S('notValidJson') + e.message.replace(/^JSON\.parse: /, '').replace(/ in JSON at position \d+.*$/, '').replace(/ at position \d+.*$/, '') + at, 'json', 'bad');
     }
   }
   function note(msg, kind, cls) { if (kind !== 'json') hold = msg ? Date.now() + 2500 : 0; sMsg.textContent = msg; sMsg.dataset.kind = kind || ''; sMsg.className = 'msg' + (cls ? ' ' + cls : ''); }
 
   function setSyntax(name, mime) {
     syntax = /\.json$/i.test(name) || /json/i.test(mime || '') ? 'JSON' : /\.(m?js|cjs)$/i.test(name) || /(java|ecma)script/i.test(mime || '') ? 'JavaScript' : /\.(md|markdown)$/i.test(name) ? 'Markdown' : /\.log$/i.test(name) ? 'Log' : 'Plain Text';
-    var SYN = { JSON: S('synJson','JSON'), JavaScript: S('synJs','JavaScript'), Markdown: S('synMd','Markdown'), Log: S('synLog','Log'), 'Plain Text': S('synPlain','Plain Text') };
+    var SYN = { JSON: S('synJson'), JavaScript: S('synJs'), Markdown: S('synMd'), Log: S('synLog'), 'Plain Text': S('synPlain') };
     sSyn.textContent = SYN[syntax] || syntax;
   }
 
@@ -325,7 +331,7 @@
   async function problem(res) { var p = null; try { p = await res.json(); } catch (e) { /* no problem details */ } return new Error(res.status + ' ' + ((p && [p.title, p.detail].filter(Boolean).join(': ')) || res.statusText || '')); }
 
   async function load(url) {
-    note(S('reading', 'Reading {n} \u2026', { n: decodeURIComponent(url.split('/').pop()) }));
+    note(S('reading', { n: decodeURIComponent(url.split('/').pop()) }));
     try {
       var res = await cdmi('GET', url.replace(/[?#].*$/, '') + '?objectType&objectName&mimetype&valuetransferencoding&value', T_OBJECT);
       if (!res.ok) throw await problem(res);
@@ -335,17 +341,17 @@
         if (rep.value === undefined && at !== url.replace(/[?#].*$/, '')) { res = await cdmi('GET', at + '?objectType&objectName&mimetype&valuetransferencoding&value', T_OBJECT); if (!res.ok) throw await problem(res); rep = await res.json(); }   // a reference: the redirect dropped the selection
         enc = rep.valuetransferencoding || 'utf-8'; mime = rep.mimetype || mime;
         if (enc === 'json') value = JSON.stringify(rep.value, null, 2) + '\n';
-        else if (enc === 'base64') { try { value = new TextDecoder('utf-8', { fatal: true }).decode(b64(rep.value || '')); } catch (e) { throw new Error(S('notText', 'this object is not text')); } }
+        else if (enc === 'base64') { try { value = new TextDecoder('utf-8', { fatal: true }).decode(b64(rep.value || '')); } catch (e) { throw new Error(S('notText')); } }
         else value = rep.value === undefined ? '' : String(rep.value);
       } else value = await res.text();
       file = { url: at, name: decodeURIComponent(at.split('/').pop()), dir: at.replace(/[^\/]*$/, ''), encoding: enc, mime: mime };
       adopt(value); note('');
-    } catch (e) { note(S('couldNotOpen', 'Could not open: {e}', { e: e.message }), '', 'bad'); }
+    } catch (e) { note(S('couldNotOpen', { e: e.message }), '', 'bad'); }
   }
   function adopt(value) {
     text.value = value; saved = value; text.setSelectionRange(0, 0); text.scrollTop = 0; text.scrollLeft = 0;
     tabName.textContent = file.name; setSyntax(file.name, file.mime);
-    sEnc.textContent = file.encoding === 'json' ? S('encJson', 'UTF-8 (stored as JSON)') : S('enc', 'UTF-8');
+    sEnc.textContent = file.encoding === 'json' ? S('encJson') : S('enc');
     gutter.dataset.lines = ''; repaint(); text.focus();          // numbers are rebuilt for the new text
   }
 
@@ -357,12 +363,12 @@
         try { body = { value: JSON.parse(v) }; } catch (e) { throw new Error('this object is stored as JSON and the text is not valid JSON; use Save As to keep it as text'); }
         query = '?value';
       } else { body = { valuetransferencoding: 'utf-8', value: v }; query = file.encoding === 'utf-8' ? '?value' : '?valuetransferencoding&value'; if (query === '?value') delete body.valuetransferencoding; }
-      note(S('saving', 'Saving \u2026'));
+      note(S('saving'));
       var res = await cdmi('PUT', file.url + query, T_OBJECT, JSON.stringify(body));
       if (!res.ok) throw await problem(res);
       if (file.encoding !== 'json') file.encoding = 'utf-8';
-      saved = v; repaint(); note(S('saved', 'Saved {n}', { n: file.name }), '', 'good');
-    } catch (e) { note(S('notSaved', 'Not saved: {e}', { e: e.message }), '', 'bad'); }
+      saved = v; repaint(); note(S('saved', { n: file.name }), '', 'good');
+    } catch (e) { note(S('notSaved', { e: e.message }), '', 'bad'); }
   }
 
   async function create(dir, name, replace) {
@@ -372,7 +378,7 @@
     if (!replace && res.status === 412) return 'exists';
     if (!res.ok) throw await problem(res);
     file = { url: url, name: name, dir: dir, encoding: 'utf-8', mime: mime };
-    saved = v; tabName.textContent = name; setSyntax(name, mime); sEnc.textContent = S('enc', 'UTF-8'); repaint(); note(S('saved', 'Saved {n}', { n: name }), '', 'good');
+    saved = v; tabName.textContent = name; setSyntax(name, mime); sEnc.textContent = S('enc'); repaint(); note(S('saved', { n: name }), '', 'good');
     return 'saved';
   }
 
@@ -380,16 +386,16 @@
 
   function saveAs() {
     var D = CTX.desktop;
-    if (!(D && D.pickObject)) { note(S('noPicker', 'No Open/Save dialog is available.'), '', 'bad'); return; }
+    if (!(D && D.pickObject)) { note(S('noPicker'), '', 'bad'); return; }
     var prefill = file.url ? file.name : (file.name === 'untitled' ? 'untitled.txt' : file.name);
     // The dialog follows the current theme. It confirms before overwriting an existing object, so the create here
     // replaces unconditionally.
-    D.pickObject({ mode: 'save', theme: isDark() ? 'dark' : 'light', title: S('saveAsTitle', 'Save As'), saveLabel: S('save', 'Save'),
+    D.pickObject({ mode: 'save', theme: isDark() ? 'dark' : 'light', title: S('saveAsTitle'), saveLabel: S('save'),
         name: prefill, startURI: (file.dir || CTX.baseURI || CTX.homeURI || null) })
       .then(function (url) {
         if (!url) return;
         var dir = url.replace(/[^\/]*$/, ''), name = decodeURIComponent(url.slice(dir.length));
-        create(dir, name, true).catch(function (e) { note(S('notSaved', 'Not saved: {e}', { e: e.message }), '', 'bad'); });
+        create(dir, name, true).catch(function (e) { note(S('notSaved', { e: e.message }), '', 'bad'); });
       });
   }
 
@@ -397,7 +403,7 @@
   var pendingDiscard = null;
   function careful(what, go) {
     if (text.value === saved || pendingDiscard === what) { pendingDiscard = null; return go(); }
-    pendingDiscard = what; note(S('unsavedDiscard', 'There are unsaved changes. Do the same again to discard them.'), '', 'bad');
+    pendingDiscard = what; note(S('unsavedDiscard'), '', 'bad');
   }
   function openWithCare(url) { careful('open:' + url, function () { load(url); }); }
   function fresh(dir) { file = { url: null, name: 'untitled', dir: dir || file.dir, encoding: 'utf-8', mime: 'text/plain' }; adopt(''); note(''); }
@@ -440,20 +446,20 @@
 
   var findMode = 'find';
   function showFind(m) {
-    findMode = m; find.classList.add('on'); fIn.placeholder = m === 'goto' ? S('gotoPlaceholder', 'Line number, then Enter') : S('findLabel', 'Find');
+    findMode = m; find.classList.add('on'); fIn.placeholder = m === 'goto' ? S('gotoPlaceholder') : S('findLabel');
     fPrev.style.display = fNext.style.display = m === 'goto' ? 'none' : '';
     var sel = text.value.slice(text.selectionStart, text.selectionEnd);
     fIn.value = m === 'find' && sel && sel.indexOf('\n') < 0 ? sel : m === 'find' ? fIn.value : ''; fCount.textContent = '';
     fIn.focus(); fIn.select(); if (m === 'find') count();
   }
   function hideFind() { find.classList.remove('on'); text.focus(); }
-  function count() { var q = fIn.value, n = 0, i = -1, v = text.value.toLowerCase(); if (q) { q = q.toLowerCase(); while ((i = v.indexOf(q, i + 1)) >= 0 && n < 9999) n++; } fCount.textContent = q ? n + (n === 1 ? S('matchOne', ' match') : S('matchMany', ' matches')) : ''; return n; }
+  function count() { var q = fIn.value, n = 0, i = -1, v = text.value.toLowerCase(); if (q) { q = q.toLowerCase(); while ((i = v.indexOf(q, i + 1)) >= 0 && n < 9999) n++; } fCount.textContent = q ? n + (n === 1 ? S('matchOne') : S('matchMany')) : ''; return n; }
   function step(back) {
     var q = fIn.value.toLowerCase(); if (!q) return;
     var v = text.value.toLowerCase(), i = back ? v.lastIndexOf(q, text.selectionStart - 1) : v.indexOf(q, text.selectionEnd);
     if (i < 0) i = back ? v.lastIndexOf(q) : v.indexOf(q);          // wrap around
     if (i < 0) return;
-    text.setSelectionRange(i, i + q.length); reveal(); place();
+    text.setSelectionRange(i, i + q.length); text.focus(); reveal(); place();   // focus so the match's selection band is actually shown
   }
   fIn.addEventListener('input', function () { if (findMode === 'find') count(); });
   fIn.addEventListener('keydown', function (ev) {
@@ -461,7 +467,7 @@
     else if (ev.key === 'Enter') {
       ev.preventDefault();
       if (findMode === 'goto') { var n = parseInt(fIn.value, 10), lines = text.value.split('\n'); if (n >= 1) { n = Math.min(n, lines.length); var pos = lines.slice(0, n - 1).join('\n').length + (n > 1 ? 1 : 0); hideFind(); text.setSelectionRange(pos, pos); reveal(); place(); } }
-      else { step(ev.shiftKey); fIn.focus(); }
+      else { step(ev.shiftKey); }   // leave focus on the match so its highlight stays; Prev/Next and Ctrl+F re-enter find
     }
   });
   fNext.addEventListener('click', function () { step(false); }); fPrev.addEventListener('click', function () { step(true); }); fClose.addEventListener('click', hideFind);
@@ -491,8 +497,8 @@
     else if (k === 'd' && ev.shiftKey) { ev.preventDefault(); setDark(!isDark()); }
   });
   function openViaPicker() {
-    if (!(CTX.desktop && CTX.desktop.pickObject)) { note(S('noPicker', 'No Open/Save dialog is available.'), '', 'bad'); return; }
-    CTX.desktop.pickObject({ theme: isDark() ? 'dark' : 'light', title: S('openTitle', 'Open'), startURI: (file.dir || CTX.baseURI || CTX.homeURI || null) })
+    if (!(CTX.desktop && CTX.desktop.pickObject)) { note(S('noPicker'), '', 'bad'); return; }
+    CTX.desktop.pickObject({ theme: isDark() ? 'dark' : 'light', title: S('openTitle'), startURI: (file.dir || CTX.baseURI || CTX.homeURI || null) })
       .then(function (url) { if (url) openWithCare(url); });
   }
 

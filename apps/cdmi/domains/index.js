@@ -15,76 +15,10 @@
   var CTX = window.CDMI_CONTEXT || {};
   var D = CTX.desktop || {};
   var R = CTX.rsrc || null;
-  function S(id, fb) { var v = R && R.text('strings', id); return v == null ? fb : v; }
+  function S(id, vars) { var v = R && R.text('strings', id); if (v == null) return id; if (vars) for (var k in vars) v = v.split('{' + k + '}').join(vars[k]); return v; }
 
   var style = document.createElement('style');
-  var DEFAULT_CSS =
-    ':root{--fg:#1f2328;--muted:#59636e;--bg:#fff;--panel:#f6f8fa;--border:#d1d9e0;--code:#eff1f3;--sel:#0969da;--selbg:#ddf4ff;--ok:#1a7f37;--warn:#9a6700;}' +
-    '@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--fg:#e6edf3;--muted:#9198a1;--bg:#0d1117;--panel:#151b23;--border:#3d444d;--code:#151b23;--sel:#4493f8;--selbg:#132132;--ok:#3fb950;--warn:#d29922;}}' +
-    'html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}' +
-    'body{display:flex;flex-direction:column;}' +
-    '#bar{display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--border);flex:none;}' +
-    '#bar input{flex:1;min-width:0;font:13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);}' +
-    '#bar button{height:30px;padding:0 12px;font-size:13px;background:var(--code);color:var(--fg);border:1px solid var(--border);border-radius:6px;cursor:pointer;}' +
-    '#bar button:hover{border-color:var(--muted);}' +
-    '#bar button:disabled{opacity:.5;cursor:default;}' +
-    '#bar button:disabled:hover{border-color:var(--border);}' +
-    '#bar button.pri{background:var(--sel);color:#fff;border-color:var(--sel);}' +
-    '#bar button.pri:hover:not(:disabled){filter:brightness(1.08);}' +
-    '#split{flex:1;min-height:0;display:flex;}' +
-    '#tree{flex:0 0 44%;min-width:180px;max-width:60%;overflow:auto;border-right:1px solid var(--border);padding:6px 0;}' +
-    '#detail{flex:1;min-width:0;overflow:auto;padding:12px 14px;}' +
-    '.node{}' +
-    '.row{display:flex;align-items:center;gap:2px;padding:2px 8px;cursor:pointer;white-space:nowrap;user-select:none;}' +
-    '.row:hover{background:var(--panel);}' +
-    '.row.sel{background:var(--selbg);}' +
-    '.tw{width:16px;flex:none;text-align:center;color:var(--muted);font-size:10px;}' +
-    '.ic{flex:none;margin:0 4px 0 0;}' +
-    '.nm{overflow:hidden;text-overflow:ellipsis;}' +
-    '.nm.disabled{color:var(--muted);text-decoration:line-through;}' +
-    '.kids{margin-left:14px;}' +
-    '.msg{color:var(--muted);padding:20px 10px;}' +
-    'h2.dh{margin:0 0 2px;font-size:16px;word-break:break-all;}' +
-    '.durl{font:12px ui-monospace,monospace;color:var(--muted);word-break:break-all;margin:0 0 12px;}' +
-    'table.f{border-collapse:collapse;width:100%;margin:0 0 14px;}' +
-    'table.f th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--border);}' +
-    'table.f td{padding:5px 8px;border-bottom:1px solid var(--border);vertical-align:top;font:12px ui-monospace,monospace;word-break:break-all;}' +
-    'table.f td.k{color:var(--muted);white-space:nowrap;width:1%;}' +
-    '.sec{font-weight:600;margin:0 0 6px;}' +
-    '.pill{display:inline-block;font-size:11px;padding:1px 7px;border-radius:10px;background:var(--code);color:var(--muted);margin-left:6px;}' +
-    '.pill.on{color:var(--ok);}.pill.off{color:var(--warn);}' +
-    /* structured (JSON) metadata values */
-    'table.jv-obj{border-collapse:collapse;width:100%;margin:0;}' +
-    'table.jv-obj td{padding:2px 6px;border:0;vertical-align:top;font:12px ui-monospace,monospace;word-break:break-all;}' +
-    'table.jv-obj td.jv-k{color:var(--muted);white-space:nowrap;width:1%;padding-right:10px;}' +
-    '.jv-v{min-width:0;}' +
-    '.jv-arr{display:flex;flex-direction:column;gap:4px;}' +
-    '.jv-item{display:flex;gap:8px;align-items:flex-start;border-left:2px solid var(--border);padding-left:8px;}' +
-    '.jv-idx{flex:none;font:11px ui-monospace,monospace;color:var(--muted);min-width:1.5em;text-align:right;padding-top:2px;}' +
-    '.jv-cell{flex:1;min-width:0;}' +
-    '.jv-pills{display:flex;flex-wrap:wrap;gap:4px;}' +
-    '.jv-pill{font:12px ui-monospace,monospace;background:var(--code);border:1px solid var(--border);border-radius:5px;padding:1px 7px;word-break:break-all;}' +
-    '.jv-empty{color:var(--muted);font-style:italic;}' +
-    '.jv-raw{font:12px ui-monospace,monospace;white-space:pre-wrap;word-break:break-all;}' +
-    '.hint{color:var(--muted);font-size:12px;margin:0 0 12px;}' +
-    '.hint.warn{color:var(--warn);}' +
-    /* modal */
-    '#ov{position:fixed;inset:0;background:rgba(0,0,0,.32);display:none;align-items:center;justify-content:center;z-index:20;}' +
-    '#ov.on{display:flex;}' +
-    '.dlg{background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:10px;width:380px;max-width:calc(100% - 32px);box-shadow:0 12px 40px rgba(0,0,0,.35);overflow:hidden;}' +
-    '.dlg h3{margin:0;padding:12px 16px;font-size:14px;border-bottom:1px solid var(--border);}' +
-    '.dlg .bd{padding:14px 16px;display:flex;flex-direction:column;gap:10px;}' +
-    '.dlg label.fl{font-size:12px;color:var(--muted);display:block;margin:0 0 4px;}' +
-    '.dlg input[type=text]{width:100%;box-sizing:border-box;font:13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);}' +
-    '.dlg .ck{display:flex;align-items:center;gap:7px;font-size:13px;}' +
-    '.dlg .under{font:12px ui-monospace,monospace;color:var(--muted);word-break:break-all;}' +
-    '.dlg .err{color:#cf222e;font-size:12px;min-height:1px;}' +
-    '@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .dlg .err{color:#ff7b72;}}' +
-    '.dlg .ft{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--border);}' +
-    '.dlg .ft button{height:30px;padding:0 14px;font-size:13px;border-radius:6px;border:1px solid var(--border);background:var(--code);color:var(--fg);cursor:pointer;}' +
-    '.dlg .ft button.pri{background:var(--sel);color:#fff;border-color:var(--sel);}' +
-    '.dlg .ft button:disabled{opacity:.5;cursor:default;}';
-  style.textContent = (R && R.text('styles', 'domains')) || DEFAULT_CSS;
+  style.textContent = R.text('styles', 'domains');
   document.head.appendChild(style);
 
   function el(t, p, k) { var e = document.createElement(t); for (var x in (p || {})) { if (x === 'text') e.textContent = p[x]; else if (x === 'html') e.innerHTML = p[x]; else e.setAttribute(x, p[x]); } (k || []).forEach(function (c) { if (c) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); }); return e; }
@@ -114,7 +48,7 @@
   }
   function objView(obj, depth) {
     var keys = Object.keys(obj);
-    if (!keys.length) return el('span', { class: 'jv-empty', text: S('empty-obj','{ } empty') });
+    if (!keys.length) return el('span', { class: 'jv-empty', text: S('empty-obj') });
     if (depth >= JV_MAX_DEPTH) return el('code', { class: 'jv-raw', text: JSON.stringify(obj) });
     var t = el('table', { class: 'jv-obj' });
     keys.forEach(function (k) {
@@ -123,7 +57,7 @@
     return t;
   }
   function arrView(arr, depth) {
-    if (!arr.length) return el('span', { class: 'jv-empty', text: S('empty-arr','[ ] empty') });
+    if (!arr.length) return el('span', { class: 'jv-empty', text: S('empty-arr') });
     if (depth >= JV_MAX_DEPTH) return el('code', { class: 'jv-raw', text: JSON.stringify(arr) });
     var allScalar = arr.every(function (x) { return isScalar(coerce(x)); });
     if (allScalar) {
@@ -134,17 +68,22 @@
     }));
   }
 
-  var input = el('input', { type: 'text', placeholder: S('origin-placeholder','https://host:port'), spellcheck: 'false' });
-  var goBtn = el('button', { type: 'button', text: S('load','Load') });
-  var newBtn = el('button', { type: 'button', class: 'pri', text: S('new-domain', 'New domain…') });
+  var input = el('input', { type: 'text', placeholder: S('origin-placeholder'), spellcheck: 'false' });
+  var goBtn = el('button', { type: 'button', text: S('load') });
+  var newBtn = el('button', { type: 'button', class: 'pri', text: S('new-domain') });
   newBtn.disabled = true;
   var bar = el('div', { id: 'bar' }, [input, goBtn, newBtn]);
   var tree = el('div', { id: 'tree' });
   var detail = el('div', { id: 'detail' });
   var split = el('div', { id: 'split' }, [tree, detail]);
   document.body.appendChild(bar); document.body.appendChild(split);
+  // One light/dark setting serves the whole desktop: the shared cvwm.dark key in localStorage, which the desktop
+  // toggles (View > Dark mode) and every app follows by mirroring it onto body.dark.
+  function setDark(on) { document.body.classList.toggle('dark', !!on); }
+  try { setDark(localStorage.getItem('cvwm.dark') === 'on'); } catch (e) { /* no storage */ }
+  window.addEventListener('storage', function (ev) { if (ev.key === 'cvwm.dark') setDark(ev.newValue === 'on'); });
   if (CTX.resize) CTX.resize(760, 520);
-  if (CTX.setTitle) CTX.setTitle(S('title','domains'));
+  if (CTX.setTitle) CTX.setTitle(S('title'));
 
   // default the origin to the desktop's own server
   (function () {
@@ -179,10 +118,10 @@
         if (my !== permToken) return;                 // selection changed while we were checking
         newBtn.disabled = !p.allowed;
         newBtn.title = p.allowed
-          ? S('create-tip','Create a sub-domain under this domain')
-          : (p.reason || S('cannot-add','You cannot add a sub-domain here.'));
+          ? S('create-tip')
+          : (p.reason || S('cannot-add'));
       })
-      .catch(function () { if (my === permToken) { newBtn.disabled = false; newBtn.title = S('create-tip','Create a sub-domain under this domain'); } });
+      .catch(function () { if (my === permToken) { newBtn.disabled = false; newBtn.title = S('create-tip'); } });
   }
 
   function fieldRows(rep) {
@@ -194,7 +133,7 @@
 
   function renderDetail(info) {
     detail.textContent = '';
-    if (!info) { detail.appendChild(el('div', { class: 'msg', text: S('select-domain','Select a domain to see its details.') })); return; }
+    if (!info) { detail.appendChild(el('div', { class: 'msg', text: S('select-domain') })); return; }
     var rep = info.rep || {};
     var isRoot = /\/cdmi_domains\/$/.test(info.url);
     var name = isRoot ? '/' : ((info.name) || (rep.objectName && rep.objectName.replace(/\/$/, '')) || '/');
@@ -207,22 +146,22 @@
 
     var frows = fieldRows(rep);
     if (frows.length) {
-      var t = el('table', { class: 'f' }, [el('tr', null, [el('th', { text: S('field','Field') }), el('th', { text: 'Value' })])]);
+      var t = el('table', { class: 'f' }, [el('tr', null, [el('th', { text: S('field') }), el('th', { text: 'Value' })])]);
       frows.forEach(function (r) { t.appendChild(el('tr', null, [el('td', { class: 'k', text: r[0] }), el('td', { text: r[1] })])); });
       detail.appendChild(t);
     }
     var md = rep.metadata || {};
     var keys = Object.keys(md).sort();
-    detail.appendChild(el('div', { class: 'sec', text: S('metadata','Metadata') + (keys.length ? '' : S('metadata-none-suffix',' (none)')) }));
+    detail.appendChild(el('div', { class: 'sec', text: S('metadata') + (keys.length ? '' : S('metadata-none-suffix')) }));
     if (keys.length) {
-      var mt = el('table', { class: 'f' }, [el('tr', null, [el('th', { text: S('item','Item') }), el('th', { text: 'Value' })])]);
+      var mt = el('table', { class: 'f' }, [el('tr', null, [el('th', { text: S('item') }), el('th', { text: 'Value' })])]);
       keys.forEach(function (k) {
         mt.appendChild(el('tr', null, [el('td', { class: 'k', text: k }), el('td', null, [jsonView(md[k])])]));
       });
       detail.appendChild(mt);
     }
     var childCount = (info.children || []).length;
-    detail.appendChild(el('div', { class: 'sec', text: S('subdomains','Sub-domains: ') + childCount }));
+    detail.appendChild(el('div', { class: 'sec', text: S('subdomains') + childCount }));
   }
 
   // A tree node: a row (twisty + icon + name) and a lazily-filled kids container.
@@ -267,7 +206,7 @@
     twisty.addEventListener('click', function (ev) { ev.stopPropagation(); if (open) collapse(); else expand(); });
     row.addEventListener('click', async function () {
       try { await ensureInfo(); select(self, info); if (hasKids && !open) expand(); }
-      catch (e) { select(self, null); detail.textContent = ''; detail.appendChild(el('div', { class: 'msg', text: S('could-not-read','Could not read ') + url + '\n\n' + ((e && e.message) || '') })); }
+      catch (e) { select(self, null); detail.textContent = ''; detail.appendChild(el('div', { class: 'msg', text: S('could-not-read') + url + '\n\n' + ((e && e.message) || '') })); }
     });
 
     self = { node: node, expand: expand, ensureInfo: ensureInfo, reloadChildren: reloadChildren, row: row, url: url, name: name, getInfo: function () { return info; } };
@@ -277,8 +216,8 @@
   async function load() {
     var origin = input.value.trim().replace(/\/+$/, '');
     tree.textContent = ''; detail.textContent = ''; selectedNode = null; newBtn.disabled = true;
-    if (!/^https:\/\//i.test(origin)) { tree.appendChild(el('div', { class: 'msg', text: S('origin-help','A server origin is an https: URL, e.g. https://cdmi.example.local:9443') })); return; }
-    tree.appendChild(el('div', { class: 'msg', text: S('reading','Reading \u2026') }));
+    if (!/^https:\/\//i.test(origin)) { tree.appendChild(el('div', { class: 'msg', text: S('origin-help') })); return; }
+    tree.appendChild(el('div', { class: 'msg', text: S('reading') }));
     var rootURL = (D.domainsRoot && D.domainsRoot(origin)) || (origin + '/cdmi_domains/');
     try {
       var root = makeNode('/', rootURL, 0);
@@ -297,18 +236,18 @@
   // ---- New domain dialog ----------------------------------------------------
   var dlgName, dlgEnabled, dlgUnder, dlgErr, dlgCreate, overlay, creating = false;
   function buildDialog() {
-    dlgName = el('input', { type: 'text', spellcheck: 'false', autocomplete: 'off', placeholder: S('name-placeholder','a domain name') });
+    dlgName = el('input', { type: 'text', spellcheck: 'false', autocomplete: 'off', placeholder: S('name-placeholder') });
     dlgEnabled = el('input', { type: 'checkbox' }); dlgEnabled.checked = true;
     dlgUnder = el('div', { class: 'under' });
     dlgErr = el('div', { class: 'err' });
-    var cancel = el('button', { type: 'button', text: S('cancel','Cancel') });
-    dlgCreate = el('button', { type: 'button', class: 'pri', text: S('create','Create') });
+    var cancel = el('button', { type: 'button', text: S('cancel') });
+    dlgCreate = el('button', { type: 'button', class: 'pri', text: S('create') });
     var dlg = el('div', { class: 'dlg' }, [
-      el('h3', { text: S('dlg-title','New domain') }),
+      el('h3', { text: S('dlg-title') }),
       el('div', { class: 'bd' }, [
-        el('div', null, [el('label', { class: 'fl', text: S('create-under','Create under') }), dlgUnder]),
-        el('div', null, [el('label', { class: 'fl', text: S('name','Name') }), dlgName]),
-        el('label', { class: 'ck' }, [dlgEnabled, document.createTextNode(S('enabled-field','Enabled (cdmi_domain_enabled)'))]),
+        el('div', null, [el('label', { class: 'fl', text: S('create-under') }), dlgUnder]),
+        el('div', null, [el('label', { class: 'fl', text: S('name') }), dlgName]),
+        el('label', { class: 'ck' }, [dlgEnabled, document.createTextNode(S('enabled-field'))]),
         dlgErr
       ]),
       el('div', { class: 'ft' }, [cancel, dlgCreate])
@@ -336,14 +275,14 @@
   async function doCreate() {
     if (creating || !selectedNode) return;
     var name = dlgName.value.trim();
-    if (!name) { dlgErr.textContent = S('enter-name','Enter a name for the domain.'); dlgName.focus(); return; }
-    if (/[\/?#]/.test(name)) { dlgErr.textContent = S('bad-name','A domain name cannot contain / ? or #.'); return; }
-    creating = true; dlgCreate.disabled = true; dlgCreate.textContent = S('creating','Creating\u2026'); dlgErr.textContent = '';
+    if (!name) { dlgErr.textContent = S('enter-name'); dlgName.focus(); return; }
+    if (/[\/?#]/.test(name)) { dlgErr.textContent = S('bad-name'); return; }
+    creating = true; dlgCreate.disabled = true; dlgCreate.textContent = S('creating'); dlgErr.textContent = '';
     var parent = selectedNode;
     var res = await (D.createDomain ? D.createDomain(parent.url, name, { enabled: dlgEnabled.checked })
-      : Promise.resolve({ ok: false, error: S('cannot-create','This desktop cannot create domains.') }));
-    creating = false; dlgCreate.textContent = S('create','Create'); dlgCreate.disabled = false;
-    if (!res || !res.ok) { dlgErr.textContent = (res && res.error) || S('could-not-create','The domain could not be created.'); return; }
+      : Promise.resolve({ ok: false, error: S('cannot-create') }));
+    creating = false; dlgCreate.textContent = S('create'); dlgCreate.disabled = false;
+    if (!res || !res.ok) { dlgErr.textContent = (res && res.error) || S('could-not-create'); return; }
     overlay.classList.remove('on');
     try {
       await parent.reloadChildren();

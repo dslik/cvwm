@@ -27,103 +27,50 @@
   // Resources: the app's own fork (CTX.rsrc), optional. Absent (a classic install) => every lookup falls back to the
   // built-in default. S() reads a string; the stylesheet and the fallback-enum table are pulled where present.
   var R = CTX.rsrc || null;
-  function S(id, fb, vars) {
-    var v = R && R.text('strings', id); if (v == null) v = fb;
+  function S(id, vars) {
+    var v = R && R.text('strings', id); if (v == null) return id;
     if (vars) for (var k in vars) v = v.split('{' + k + '}').join(vars[k]);
     return v;
   }
   var PROTOCOL = '2026-07-28';
 
-  // CDMI closed-set arguments the input schema does not yet declare as enums. Offered as an editable pick-list (a
-  // client fallback); once a server declares the enum, that authoritative list is used as a strict select instead.
-  var FALLBACK_ENUMS = {
-    representation: ['cdmi-object', 'cdmi-container', 'cdmi-queue', 'cdmi-domain', 'cdmi-capability'],
-    mode: ['replace', 'replace-fields', 'merge']
-  };
-  if (R) { var _en = R.json('data', 'enums'); if (_en && typeof _en === 'object') FALLBACK_ENUMS = _en; }
+  // CDMI closed-set arguments the input schema does not yet declare as enums. Offered as an editable pick-list from
+  // the resource table; once a server declares the enum, that authoritative list is used as a strict select instead.
+  var FALLBACK_ENUMS = (R && R.json('data', 'enums')) || {};
 
   var style = document.createElement('style');
-  var DEFAULT_CSS =
-    ':root{--fg:#1f2328;--muted:#59636e;--bg:#fff;--panel:#f6f8fa;--border:#d1d9e0;--code:#eff1f3;--accent:#0969da;--ok:#1a7f37;--err:#cf222e;--sel:#ddf4ff;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;}' +
-    '@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--fg:#e6edf3;--muted:#9198a1;--bg:#0d1117;--panel:#151b23;--border:#3d444d;--code:#151b23;--accent:#4493f8;--ok:#3fb950;--err:#f85149;--sel:#132132;}}' +
-    'html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}' +
-    'body{display:flex;flex-direction:column;}' +
-    // top row: endpoint (left), token (beside it), Connect (right) — inputs and button one height.
-    '#top{display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--border);flex:none;}' +
-    '#top input{height:30px;box-sizing:border-box;min-width:0;font:12px var(--mono);padding:0 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);}' +
-    '#top .ep{flex:2 1 0;}' +
-    '#top .tok{flex:1 1 0;}' +
-    '#top .go{height:30px;flex:none;padding:0 18px;background:var(--accent);color:#fff;border:1px solid var(--accent);border-radius:6px;font-weight:600;cursor:pointer;}' +
-    '#top .go:disabled{opacity:.6;cursor:default;}' +
-    // second row: the token-minting controls.
-    '#crow{display:flex;gap:6px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--border);flex:none;}' +
-    '#crow label{color:var(--muted);font-size:12px;flex:none;}' +
-    '#crow input{height:28px;box-sizing:border-box;flex:1 1 0;min-width:60px;font:12px var(--mono);padding:0 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);}' +
-    '#crow .mint{height:28px;flex:none;padding:0 10px;background:var(--code);color:var(--fg);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12px;}' +
-    '#crow .mint:hover{border-color:var(--muted);}#crow .mint:disabled{opacity:.6;cursor:default;}' +
-    // status line pinned to the bottom of the window, where errors show.
-    '#status{flex:none;padding:5px 10px;font:12px var(--mono);border-top:1px solid var(--border);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
-    '#status .ok{color:var(--ok);}#status .err{color:var(--err);}' +
-    '#split{flex:1;min-height:0;display:flex;}' +
-    // left column: the capability tabs above a scrolling list.
-    '#left{flex:0 0 34%;min-width:180px;max-width:55%;display:flex;flex-direction:column;border-right:1px solid var(--border);}' +
-    '#tabs{display:flex;flex:none;border-bottom:1px solid var(--border);}' +
-    '#tabs button{flex:1;padding:7px 6px;background:var(--panel);border:0;border-right:1px solid var(--border);cursor:pointer;font:inherit;font-size:12px;color:var(--muted);}' +
-    '#tabs button:last-child{border-right:0;}' +
-    '#tabs button.on{background:var(--bg);color:var(--fg);font-weight:600;box-shadow:inset 0 -2px 0 var(--accent);}' +
-    '#tabs button:disabled{opacity:.45;cursor:default;}' +
-    '#list{flex:1;overflow:auto;}' +
-    '.tool{padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;}' +
-    '.tool:hover{background:var(--panel);}.tool.sel{background:var(--sel);}' +
-    '.tool .nm{font-family:var(--mono);font-weight:600;word-break:break-all;}' +
-    '.tool .ds{color:var(--muted);font-size:12px;}' +
-    '.tool .ro{font-size:11px;color:var(--ok);}' +
-    '#panel{flex:1;min-width:0;overflow:auto;padding:12px 14px;}' +
-    '#panel h2{margin:0 0 2px;font:600 15px var(--mono);word-break:break-all;}' +
-    '#panel .desc{color:var(--muted);margin:0 0 12px;}' +
-    '.field{margin:0 0 10px;}' +
-    '.field label{display:block;font-size:12px;margin:0 0 3px;}' +
-    '.field .req{color:var(--err);}' +
-    '.field .hint{color:var(--muted);font-size:11px;margin:2px 0 0;}' +
-    '.field input,.field textarea,.field select{width:100%;box-sizing:border-box;font:12px var(--mono);padding:5px 7px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);}' +
-    '.field textarea{min-height:70px;resize:vertical;}' +
-    '#call{height:30px;padding:0 16px;background:var(--accent);color:#fff;border:1px solid var(--accent);border-radius:6px;font-weight:600;cursor:pointer;margin:4px 0 12px;}' +
-    '#call:disabled{opacity:.6;cursor:default;}' +
-    '#result{border-top:1px solid var(--border);padding-top:10px;}' +
-    '#result .rt{font-size:12px;margin:0 0 6px;}' +
-    '#result .lbl{color:var(--muted);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;margin:12px 0 4px;}' +
-    '#result .role{font-size:11px;font-weight:700;color:var(--accent);margin:12px 0 2px;text-transform:uppercase;letter-spacing:.03em;}' +
-    '#result pre{margin:0;padding:10px;background:var(--code);border-radius:6px;font:12px var(--mono);white-space:pre-wrap;word-break:break-word;overflow:auto;max-height:50vh;}' +
-    '.msg{color:var(--muted);padding:24px 12px;text-align:center;}';
-  style.textContent = (R && R.text('styles', 'mcpinspector')) || DEFAULT_CSS;
+  style.textContent = R.text('styles', 'mcpinspector');
   document.head.appendChild(style);
 
   function el(t, p, k) { var e = document.createElement(t); for (var x in (p || {})) { if (x === 'text') e.textContent = p[x]; else if (x === 'html') e.innerHTML = p[x]; else e.setAttribute(x, p[x]); } (k || []).forEach(function (c) { if (c) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); }); return e; }
 
-  var endpoint = el('input', { type: 'text', id: 'ep', class: 'ep', spellcheck: 'false', placeholder: S('endpointPlaceholder', 'https://host:8100/mcp') });
-  var token = el('input', { type: 'password', id: 'tok', class: 'tok', spellcheck: 'false', placeholder: S('tokenPlaceholder', 'bearer token') });
-  var connect = el('button', { class: 'go', type: 'button', text: S('connect', 'Connect') });
-  var clientId = el('input', { type: 'text', id: 'cid', spellcheck: 'false', placeholder: S('clientIdPlaceholder', 'client id') });
-  var clientSecret = el('input', { type: 'password', id: 'csec', spellcheck: 'false', placeholder: S('clientSecretPlaceholder', 'client secret') });
-  var getBtn = el('button', { class: 'mint', type: 'button', text: S('getToken', 'Get token') });
-  var userBtn = el('button', { class: 'mint', type: 'button', text: S('useUser', 'Use logged-in user') });
+  var endpoint = el('input', { type: 'text', id: 'ep', class: 'ep', spellcheck: 'false', placeholder: S('endpointPlaceholder') });
+  var token = el('input', { type: 'password', id: 'tok', class: 'tok', spellcheck: 'false', placeholder: S('tokenPlaceholder') });
+  var connect = el('button', { class: 'go', type: 'button', text: S('connect') });
+  var clientId = el('input', { type: 'text', id: 'cid', spellcheck: 'false', placeholder: S('clientIdPlaceholder') });
+  var clientSecret = el('input', { type: 'password', id: 'csec', spellcheck: 'false', placeholder: S('clientSecretPlaceholder') });
+  var getBtn = el('button', { class: 'mint', type: 'button', text: S('getToken') });
+  var userBtn = el('button', { class: 'mint', type: 'button', text: S('useUser') });
   var top = el('div', { id: 'top' }, [endpoint, token, connect]);
   var crow = el('div', { id: 'crow' }, [
-    el('label', { for: 'cid', text: S('client', 'Client') }), clientId, clientSecret, getBtn, userBtn
+    el('label', { for: 'cid', text: S('client') }), clientId, clientSecret, getBtn, userBtn
   ]);
-  var status = el('div', { id: 'status', text: S('notConnected', 'Not connected.') });
+  var status = el('div', { id: 'status', text: S('notConnected') });
   var tabsEl = el('div', { id: 'tabs' });
-  var listEl = el('div', { id: 'list' }, [el('div', { class: 'msg', text: S('listConnect', 'Connect to list what the server offers.') })]);
+  var listEl = el('div', { id: 'list' }, [el('div', { class: 'msg', text: S('listConnect') })]);
   var leftEl = el('div', { id: 'left' }, [tabsEl, listEl]);
-  var panel = el('div', { id: 'panel' }, [el('div', { class: 'msg', text: S('panelConnect', 'Connect, then pick an item.') })]);
+  var panel = el('div', { id: 'panel' }, [el('div', { class: 'msg', text: S('panelConnect') })]);
   var split = el('div', { id: 'split' }, [leftEl, panel]);
   // top row and token controls above; the split fills; the status line sits at the bottom.
   document.body.appendChild(top); document.body.appendChild(crow); document.body.appendChild(split); document.body.appendChild(status);
   if (CTX.resize) CTX.resize(900, 640);
-  if (CTX.setTitle) CTX.setTitle(S('title', 'mcpinspector'));
+  if (CTX.setTitle) CTX.setTitle(S('title'));
 
-  // Prefill the endpoint from the server's advertised cdmi_mcp_uri, else from the origin on an 8100 guess.
+  // Prefill: launch arguments (endpoint [token]) or a start URI win; else the advertised cdmi_mcp_uri, else an 8100 guess.
   (function () {
+    var a = CTX.argv || [];
+    if (a.length && a[0]) { endpoint.value = a[0]; if (a[1]) token.value = a[1]; return; }
+    if (CTX.startURI) { endpoint.value = CTX.startURI; return; }
     var adv = (D.mcpEndpoint && D.mcpEndpoint()) || CTX.mcpUri;
     if (adv) { endpoint.value = adv; return; }
     try { var o = new URL(CTX.baseURI || CTX.origin); endpoint.value = o.protocol + '//' + o.hostname + ':8100/mcp'; } catch (e) {}
@@ -184,21 +131,21 @@
 
   // The kinds a tab is shown for: tools whenever the server offers any, prompts/resources only where advertised.
   var KINDS = [
-    { key: 'tools', label: S('tabTools', 'Tools') },
-    { key: 'prompts', label: S('tabPrompts', 'Prompts') },
-    { key: 'resources', label: S('tabResources', 'Resources') }
+    { key: 'tools', label: S('tabTools') },
+    { key: 'prompts', label: S('tabPrompts') },
+    { key: 'resources', label: S('tabResources') }
   ];
 
   async function doConnect() {
-    if (!/^https?:\/\//i.test(endpoint.value.trim())) { setStatus(S('httpUrl', 'The endpoint is an http(s) URL.'), 'err'); return; }
-    connect.disabled = true; setStatus(S('initializing', 'Initializing …'));
+    if (!/^https?:\/\//i.test(endpoint.value.trim())) { setStatus(S('httpUrl'), 'err'); return; }
+    connect.disabled = true; setStatus(S('initializing'));
     tabsEl.textContent = ''; listEl.textContent = ''; panel.textContent = '';
     lists = { tools: [], prompts: [], resources: [], templates: [] }; selected = null;
     try {
       var init = await rpc('initialize', { protocolVersion: PROTOCOL, capabilities: {}, clientInfo: { name: 'cvwm-mcpinspector', version: '1' } });
       var sv = (init && init.serverInfo) || {};
       caps = (init && init.capabilities) || {};
-      setStatus(S('connectedPrefix', 'Connected — ') + (sv.name || 'server') + ' ' + (sv.version || '') + ', protocol ' + (init.protocolVersion || '?') + capsSummary(caps), 'ok');
+      setStatus(S('connectedPrefix') + (sv.name || 'server') + ' ' + (sv.version || '') + ', protocol ' + (init.protocolVersion || '?') + capsSummary(caps), 'ok');
 
       // Tools: attempt the list whenever the server advertises the capability, and also unconditionally, since the
       // CDMI-over-MCP binding offers tools without always spelling the capability out. Prompts and resources are called
@@ -214,7 +161,7 @@
       selectKind(firstKind);
     } catch (e) {
       setStatus('' + (e.message || e), 'err');
-      listEl.appendChild(el('div', { class: 'msg', text: S('couldNotConnect', 'Could not connect.') }));
+      listEl.appendChild(el('div', { class: 'msg', text: S('couldNotConnect') }));
       showError(e);
     } finally { connect.disabled = false; }
   }
@@ -304,11 +251,11 @@
     var type = spec.type || 'string';
     var enumVals = Array.isArray(spec.enum) && spec.enum.length ? spec.enum : null;
     if (enumVals) {
-      var sel = el('select', {}, [el('option', { value: '', text: S('unset', '(unset)') })].concat(enumVals.map(function (v) { return el('option', { value: String(v), text: String(v) }); })));
+      var sel = el('select', {}, [el('option', { value: '', text: S('unset') })].concat(enumVals.map(function (v) { return el('option', { value: String(v), text: String(v) }); })));
       return { input: sel, read: function () { return sel.value === '' ? undefined : sel.value; } };
     }
     if (type === 'boolean') {
-      var b = el('select', {}, [el('option', { value: '', text: S('unset', '(unset)') }), el('option', { value: 'true', text: 'true' }), el('option', { value: 'false', text: 'false' })]);
+      var b = el('select', {}, [el('option', { value: '', text: S('unset') }), el('option', { value: 'true', text: 'true' }), el('option', { value: 'false', text: 'false' })]);
       return { input: b, read: function () { return b.value === '' ? undefined : b.value === 'true'; } };
     }
     if (type === 'object') {
@@ -352,7 +299,7 @@
     if (fields.uri && fields.uri.input.tagName === 'INPUT' && !fields.uri.input.value) fields.uri.input.value = '/';
     if (fields.baseUri && !fields.baseUri.input.value) { var ns = (D.mounted && D.mounted()[0]); if (ns) fields.baseUri.input.value = ns.base; }
 
-    var callBtn = el('button', { id: 'call', type: 'button', text: S('call', 'Call ') + t.name });
+    var callBtn = el('button', { id: 'call', type: 'button', text: S('call') + t.name });
     var result = el('div', { id: 'result' });
     panel.appendChild(callBtn); panel.appendChild(result);
     callBtn.addEventListener('click', function () { doCall(t, fields, result, callBtn); });
@@ -366,7 +313,7 @@
       catch (e) { bad = name + ': ' + (fields[name].f && fields[name].f.isJson ? 'not valid JSON' : (e.message || e)); }
     });
     if (bad) { result.textContent = ''; result.appendChild(el('div', { class: 'rt err', text: bad })); return; }
-    callBtn.disabled = true; result.textContent = ''; result.appendChild(el('div', { class: 'rt', text: S('calling', 'Calling …') }));
+    callBtn.disabled = true; result.textContent = ''; result.appendChild(el('div', { class: 'rt', text: S('calling') }));
     try {
       var r = await rpc('tools/call', { name: t.name, arguments: args });
       result.textContent = '';
@@ -389,7 +336,7 @@
       }
     } catch (e) {
       result.textContent = '';
-      result.appendChild(el('div', { class: 'rt err', text: S('error', 'Error') + (e.code ? ' ' + e.code : '') + ': ' + (e.message || e) }));
+      result.appendChild(el('div', { class: 'rt err', text: S('error') + (e.code ? ' ' + e.code : '') + ': ' + (e.message || e) }));
       if (e.data) result.appendChild(el('pre', { text: JSON.stringify(e.data, null, 2) }));
     } finally { callBtn.disabled = false; }
   }
@@ -406,7 +353,7 @@
       var r = fieldRow(a.name, { type: 'string', description: a.description }, !!a.required);
       fields[a.name] = r.f; panel.appendChild(r.field);
     });
-    if (!argDefs.length) panel.appendChild(el('p', { class: 'desc', text: S('noArgs', 'This prompt takes no arguments.') }));
+    if (!argDefs.length) panel.appendChild(el('p', { class: 'desc', text: S('noArgs') }));
     var btn = el('button', { id: 'call', type: 'button', text: 'Get prompt' });
     var result = el('div', { id: 'result' });
     panel.appendChild(btn); panel.appendChild(result);
@@ -426,7 +373,7 @@
         });
       } catch (e) {
         result.textContent = '';
-        result.appendChild(el('div', { class: 'rt err', text: S('error', 'Error') + (e.code ? ' ' + e.code : '') + ': ' + (e.message || e) }));
+        result.appendChild(el('div', { class: 'rt err', text: S('error') + (e.code ? ' ' + e.code : '') + ': ' + (e.message || e) }));
         if (e.data) result.appendChild(el('pre', { text: JSON.stringify(e.data, null, 2) }));
       } finally { btn.disabled = false; }
     });
@@ -447,13 +394,13 @@
     } else {
       panel.appendChild(el('div', { class: 'field' }, [el('label', {}, ['uri']), (function () { var i = el('input', { type: 'text', spellcheck: 'false', readonly: 'readonly' }); i.value = r.uri || ''; return i; })()]));
     }
-    var btn = el('button', { id: 'call', type: 'button', text: S('readResource', 'Read resource') });
+    var btn = el('button', { id: 'call', type: 'button', text: S('readResource') });
     var result = el('div', { id: 'result' });
     panel.appendChild(btn); panel.appendChild(result);
     btn.addEventListener('click', async function () {
       var uri = isTemplate ? uriInput.read() : r.uri;
-      if (!uri) { result.textContent = ''; result.appendChild(el('div', { class: 'rt err', text: S('fillUri', 'Fill in the resource URI.') })); return; }
-      btn.disabled = true; result.textContent = ''; result.appendChild(el('div', { class: 'rt', text: S('reading', 'Reading …') }));
+      if (!uri) { result.textContent = ''; result.appendChild(el('div', { class: 'rt err', text: S('fillUri') })); return; }
+      btn.disabled = true; result.textContent = ''; result.appendChild(el('div', { class: 'rt', text: S('reading') }));
       try {
         var res = await rpc('resources/read', { uri: uri });
         result.textContent = '';
@@ -463,7 +410,7 @@
         if (!contents.length) result.appendChild(el('pre', { text: JSON.stringify(res, null, 2) }));
       } catch (e) {
         result.textContent = '';
-        result.appendChild(el('div', { class: 'rt err', text: S('error', 'Error') + (e.code ? ' ' + e.code : '') + ': ' + (e.message || e) }));
+        result.appendChild(el('div', { class: 'rt err', text: S('error') + (e.code ? ' ' + e.code : '') + ': ' + (e.message || e) }));
         if (e.data) result.appendChild(el('pre', { text: JSON.stringify(e.data, null, 2) }));
       } finally { btn.disabled = false; }
     });
@@ -506,7 +453,7 @@
   // error names that first, then the CORS/paste-a-token fallback.
   async function discoverTokenEndpoint() {
     var ep = endpoint.value.trim();
-    if (!/^https?:\/\//i.test(ep)) throw new Error(S('setEndpointFirst', 'Set the MCP endpoint URL first.'));
+    if (!/^https?:\/\//i.test(ep)) throw new Error(S('setEndpointFirst'));
     var u = new URL(ep);
     var prm = u.origin + '/.well-known/oauth-protected-resource' + u.pathname;   // RFC 9728 places the path after the well-known segment
     var meta = await getJson(prm, 'the protected-resource metadata');
@@ -515,7 +462,7 @@
     var asBase = String(servers[0]).replace(/\/$/, '');
     var asMeta = await getJson(asBase + '/.well-known/oauth-authorization-server', 'the authorization server metadata');
     if (!asMeta.token_endpoint) throw new Error('The authorization server metadata names no token endpoint.');
-    return { tokenEndpoint: asMeta.token_endpoint, resource: meta.resource || ep, grants: asMeta.grant_types_supported || [] };
+    return { tokenEndpoint: asMeta.token_endpoint, resource: meta.resource || ep, grants: asMeta.grant_types_supported || [], authMethods: asMeta.token_endpoint_auth_methods_supported || [] };
   }
   async function getJson(url, what) {
     var res;
@@ -528,39 +475,53 @@
     var here = ''; try { here = new URL(CTX.baseURI || CTX.origin || location.href).origin; } catch (x) {}
     var there = ''; try { there = new URL(url).origin; } catch (x) {}
     if (here && there && here !== there) {
-      return new Error('Could not reach ' + what + ' at ' + there + ' from this desktop (' + here + '). It is a different origin. ' +
-        'The setup enables cross-origin (CORS) requests to it, so the usual cause is that this browser does not yet trust the server’s TLS certificate on that origin: a self-signed certificate is accepted per origin, and ' + there + ' is a different port from the desktop, so accepting it for the desktop did not cover it. ' +
-        'Open ' + there + '/ in this browser and accept the certificate, then try again. ' +
-        '(If the server was not built with CORS, mint a token outside the browser — the setup prints a curl — and paste it into Token instead.)');
+      return new Error('Could not reach ' + what + ' at ' + there + ' from this desktop (' + here + '). ' +
+        'It is a different origin, and a browser reports an untrusted TLS certificate and a missing CORS header the same way, so it is one of two things. ' +
+        'The certificate: a self-signed certificate is accepted per origin, and ' + there + ' is a different port from this desktop, so accepting it here did not cover it — open ' + there + '/ in this browser, accept it, and try again. ' +
+        'The server’s origin list: if ' + there + '/ already loads, the certificate is fine and the server is simply not permitting this page to read its answers. For a seedmi-dc controller that is [listen].origins in its configuration, which must name ' + here + ' (seedmi-dc 1.6 or later; earlier controllers have no such setting); restart the controller after changing it. ' +
+        'Either way you can mint a token outside the browser — the setup prints a curl — and paste it into Token instead.');
     }
     return new Error('Could not reach ' + what + ' (' + (e && e.message || 'fetch failed') + ').');
   }
-  async function mintToken(form, label) {
-    setStatus(S('requestingToken', 'Requesting a token …'));
+  async function mintToken(form, label, client) {
+    setStatus(S('requestingToken'));
     var disc;
     try { disc = await discoverTokenEndpoint(); }
     catch (e) { setStatus('' + (e.message || e), 'err'); showError(e); return; }
     form.set('resource', disc.resource);
     if (!form.has('scope')) form.set('scope', 'cdmi:read cdmi:write cdmi:admin');
+    // Authenticate the client. A password grant still needs the client to prove who it is -- the resource owner's
+    // credentials are not the client's -- so both grants carry the client credentials here. Prefer HTTP Basic
+    // (client_secret_basic), the baseline every OAuth server must support and the one this controller advertises;
+    // fall back to the body only where the metadata advertises client_secret_post and not Basic. RFC 6749 2.3.1:
+    // the id and secret are form-urlencoded before being joined and base64 encoded, so a secret with - or _ (which
+    // setup-cvwm.py's secrets.token_urlsafe produces) authenticates reliably rather than by accident.
+    var headers = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' };
+    var methods = disc.authMethods || [];
+    if (!methods.length || methods.indexOf('client_secret_basic') >= 0) {
+      headers.Authorization = 'Basic ' + btoa(encodeURIComponent(client.id) + ':' + encodeURIComponent(client.secret));
+    } else if (methods.indexOf('client_secret_post') >= 0) {
+      form.set('client_id', client.id); form.set('client_secret', client.secret);
+    } else {
+      setStatus('The authorization server asks for a client authentication method this app does not implement (' + methods.join(', ') + ').', 'err'); return;
+    }
     var res;
-    try { res = await fetch(disc.tokenEndpoint, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, body: form.toString(), cache: 'no-store' }); }
+    try { res = await fetch(disc.tokenEndpoint, { method: 'POST', headers: headers, body: form.toString(), cache: 'no-store' }); }
     catch (e) { var err = crossOriginError(disc.tokenEndpoint, 'the token endpoint', e); setStatus('' + err.message, 'err'); showError(err); return; }
     var text = await res.text(), data = {}; try { data = JSON.parse(text); } catch (e) {}
     if (!res.ok || !data.access_token) {
-      setStatus(S('tokenRefused', 'Token request refused: ') + (data.error || ('HTTP ' + res.status)) + (data.error_description ? ' — ' + data.error_description : ''), 'err');
+      setStatus(S('tokenRefused') + (data.error || ('HTTP ' + res.status)) + (data.error_description ? ' — ' + data.error_description : ''), 'err');
       return;
     }
     token.value = data.access_token;
-    setStatus(S('tokenObtained', 'Token obtained ') + label + (data.expires_in ? ' (expires in ' + data.expires_in + 's)' : '') + '. Click Connect.', 'ok');
+    setStatus(S('tokenObtained') + label + (data.expires_in ? ' (expires in ' + data.expires_in + 's)' : '') + '. Click Connect.', 'ok');
   }
 
   getBtn.addEventListener('click', function () {
-    if (!clientId.value.trim() || !clientSecret.value.trim()) { setStatus(S('enterClient', 'Enter the client id and secret.'), 'err'); return; }
+    if (!clientId.value.trim() || !clientSecret.value.trim()) { setStatus(S('enterClient'), 'err'); return; }
     var form = new URLSearchParams();
     form.set('grant_type', 'client_credentials');
-    form.set('client_id', clientId.value.trim());
-    form.set('client_secret', clientSecret.value.trim());
-    mintToken(form, 'for client ' + clientId.value.trim());
+    mintToken(form, 'for client ' + clientId.value.trim(), { id: clientId.value.trim(), secret: clientSecret.value.trim() });
   });
 
   userBtn.addEventListener('click', function () {
@@ -573,11 +534,14 @@
     if (i < 0) { setStatus('The signed-in credential could not be read.', 'err'); return; }
     var pass = decoded.slice(i + 1);
     var username = CTX.principal || decoded.slice(0, i);   // the realm-qualified name the desktop resolved, else the bare one
+    // The password grant still authenticates the client, so the client id/secret are required here too (they are the
+    // client's identity, not the user's) and ride on the Authorization header via mintToken.
+    if (!clientId.value.trim() || !clientSecret.value.trim()) { setStatus(S('enterClient'), 'err'); return; }
     var form = new URLSearchParams();
     form.set('grant_type', 'password');
     form.set('username', username);
     form.set('password', pass);
-    mintToken(form, 'for ' + username);
+    mintToken(form, 'for ' + username, { id: clientId.value.trim(), secret: clientSecret.value.trim() });
   });
   if (!(CTX.headers && /^Basic /i.test(String((CTX.headers || {}).Authorization || '')))) userBtn.disabled = true, userBtn.title = 'Sign in to the desktop with a username and password to use this.';
 

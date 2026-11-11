@@ -18,26 +18,31 @@
   /* ---- localization: the five languages cvwm ships (en, es, fr, hi, zh); follows the live "cvwm.locale" signal,
      the same same-origin localStorage key the Locale panel writes and every app re-renders on. ---- */
   var STRINGS = {
-    en: { title: 'Apps', applications: 'Applications', add: 'Add app…', remove: 'Remove',
+    en: { title: 'Apps', applications: 'Applications', add: 'Add app…', remove: 'Remove', discover: 'Discover',
           noApps: 'No apps. Use Add app… to register one.', noTypes: 'No file types.',
           typeOne: '{n} type', typeMany: '{n} types', none: '—',
-          pick: 'Choose an application container', signIn: 'Sign in to manage applications.' },
-    es: { title: 'Aplicaciones', applications: 'Aplicaciones', add: 'Añadir app…', remove: 'Quitar',
+          pick: 'Choose an application container', signIn: 'Sign in to manage applications.',
+          scanning: 'Scanning your home…', discNone: 'No new applications found.', discOne: 'Added 1 application.', discMany: 'Added {n} applications.' },
+    es: { title: 'Aplicaciones', applications: 'Aplicaciones', add: 'Añadir app…', remove: 'Quitar', discover: 'Descubrir',
           noApps: 'No hay aplicaciones. Usa Añadir app… para registrar una.', noTypes: 'No hay tipos de archivo.',
           typeOne: '{n} tipo', typeMany: '{n} tipos', none: '—',
-          pick: 'Elige un contenedor de aplicación', signIn: 'Inicia sesión para gestionar las aplicaciones.' },
-    fr: { title: 'Applications', applications: 'Applications', add: 'Ajouter une app…', remove: 'Retirer',
+          pick: 'Elige un contenedor de aplicación', signIn: 'Inicia sesión para gestionar las aplicaciones.',
+          scanning: 'Explorando tu carpeta personal…', discNone: 'No se encontraron aplicaciones nuevas.', discOne: 'Se añadió 1 aplicación.', discMany: 'Se añadieron {n} aplicaciones.' },
+    fr: { title: 'Applications', applications: 'Applications', add: 'Ajouter une app…', remove: 'Retirer', discover: 'Découvrir',
           noApps: 'Aucune application. Utilisez Ajouter une app… pour en enregistrer une.', noTypes: 'Aucun type de fichier.',
           typeOne: '{n} type', typeMany: '{n} types', none: '—',
-          pick: 'Choisissez un conteneur d’application', signIn: 'Connectez-vous pour gérer les applications.' },
-    hi: { title: 'ऐप्स', applications: 'ऐप्लिकेशन', add: 'ऐप जोड़ें…', remove: 'हटाएँ',
+          pick: 'Choisissez un conteneur d’application', signIn: 'Connectez-vous pour gérer les applications.',
+          scanning: 'Analyse de votre dossier personnel…', discNone: 'Aucune nouvelle application trouvée.', discOne: '1 application ajoutée.', discMany: '{n} applications ajoutées.' },
+    hi: { title: 'ऐप्स', applications: 'ऐप्लिकेशन', add: 'ऐप जोड़ें…', remove: 'हटाएँ', discover: 'खोजें',
           noApps: 'कोई ऐप नहीं। पंजीकृत करने के लिए ऐप जोड़ें… का उपयोग करें।', noTypes: 'कोई फ़ाइल प्रकार नहीं।',
           typeOne: '{n} प्रकार', typeMany: '{n} प्रकार', none: '—',
-          pick: 'एक ऐप्लिकेशन कंटेनर चुनें', signIn: 'ऐप्लिकेशन प्रबंधित करने के लिए साइन इन करें।' },
-    zh: { title: '应用', applications: '应用程序', add: '添加应用…', remove: '移除',
+          pick: 'एक ऐप्लिकेशन कंटेनर चुनें', signIn: 'ऐप्लिकेशन प्रबंधित करने के लिए साइन इन करें।',
+          scanning: 'आपका होम स्कैन किया जा रहा है…', discNone: 'कोई नई ऐप्लिकेशन नहीं मिली।', discOne: '1 ऐप्लिकेशन जोड़ी गई।', discMany: '{n} ऐप्लिकेशन जोड़ी गईं।' },
+    zh: { title: '应用', applications: '应用程序', add: '添加应用…', remove: '移除', discover: '发现',
           noApps: '没有应用。使用“添加应用…”来注册一个。', noTypes: '没有文件类型。',
           typeOne: '{n} 种类型', typeMany: '{n} 种类型', none: '—',
-          pick: '选择一个应用程序容器', signIn: '登录以管理应用程序。' }
+          pick: '选择一个应用程序容器', signIn: '登录以管理应用程序。',
+          scanning: '正在扫描您的主目录…', discNone: '未发现新的应用程序。', discOne: '已添加 1 个应用程序。', discMany: '已添加 {n} 个应用程序。' }
   };
   function baseLang(tag) { return String(tag || 'en').toLowerCase().split('-')[0]; }
   function readLocaleLang() { try { var s = localStorage.getItem('cvwm.locale'); if (s) { var o = JSON.parse(s); if (o && o.language) return o.language; } } catch (e) {} return (c.locale && c.locale.language) || 'en'; }
@@ -76,6 +81,7 @@
     '.foot{flex:none;display:flex;gap:7px;align-items:center;padding:8px 12px;border-top:1px solid var(--lt)}' +
     'button.btn{height:26px;padding:0 12px;background:var(--grey);font:600 12px var(--sans);color:var(--fg);border:2px solid;border-color:var(--lt) var(--dk) var(--dk) var(--lt)}' +
     'button.btn:active{border-color:var(--dk) var(--lt) var(--lt) var(--dk)}button.btn:disabled{color:var(--dim)}' +
+    '.foot .msg{flex:1;min-width:0;font:12px var(--sans);color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
     '.empty{color:var(--dim);font:12px var(--sans);padding:12px}';
   D.head.appendChild(mk('style', { text: CSS }));
 
@@ -88,9 +94,15 @@
   async function readJSON(url) {
     var res = await fetch(url + '?value', { headers: headers({ Accept: 'application/cdmi-object' }) });
     if (!res.ok) throw new Error(String(res.status));
-    var rep = await res.json(), raw = rep.value || '';
-    if (rep.valuetransferencoding === 'base64') raw = b64text(raw);
+    var rep = await res.json(), raw = rep.value;
+    if (raw && typeof raw === 'object') return raw;                   // the server returned the value already parsed (valuetransferencoding "json")
+    raw = raw || ''; if (rep.valuetransferencoding === 'base64') raw = b64text(raw);
     return JSON.parse(raw);
+  }
+  // An app's file-type manifest. The resource fork preserves file extensions, so it is the object "rsrc/filetypes.json".
+  async function readManifest(uri) {
+    try { var m = await readJSON(uri + 'rsrc/filetypes.json'); if (m && Array.isArray(m.types)) return m.types; } catch (e) { /* none */ }
+    return [];
   }
 
   /* ---- icons: a built-in name via the desktop, or the app's own / a resource icon fetched as a data URL ---- */
@@ -134,8 +146,7 @@
     manifests = {};
     for (var i = 0; i < cfg.apps.length; i++) {
       var rel = cfg.apps[i], uri = appURIof(rel);
-      try { var m = await readJSON(uri + 'rsrc/filetypes'); manifests[uri] = Array.isArray(m.types) ? m.types : []; }   // the fork serves filetypes.json as the object "filetypes" (extension dropped on install)
-      catch (e) { manifests[uri] = []; }
+      manifests[uri] = await readManifest(uri);
     }
   }
   async function save() {
@@ -143,20 +154,24 @@
       var res = await fetch(HOME + 'prefs/apps.json', { method: 'PUT', headers: headers({ 'Content-Type': 'application/cdmi-object', Accept: 'application/cdmi-object' }),
         body: JSON.stringify({ mimetype: 'application/json', metadata: {}, valuetransferencoding: 'utf-8', value: JSON.stringify(cfg, null, 2) }) });
       if (!res.ok) console.warn('apps.json save returned ' + res.status);
+      else if (c.desktop && c.desktop.reloadApps) { try { c.desktop.reloadApps(); } catch (e) {} }   // let cvwm pick up the change now (dispatch + icons)
     } catch (e) { console.warn('apps.json save failed', e); }
   }
 
   /* ---- build: two equal-height lists side by side (no divider, no status), Add/Remove in a shared footer ---- */
   var col1 = mk('div', { class: 'scroll' }), col2wrap = mk('div', { class: 'scroll' });
   var addBtn = mk('button', { class: 'btn', type: 'button', text: tr('add') });
+  var discoverBtn = mk('button', { class: 'btn', type: 'button', text: tr('discover') });
   var remBtn = mk('button', { class: 'btn', type: 'button', text: tr('remove') });
+  var footMsg = mk('span', { class: 'msg' });
   var appsH4 = mk('h4', { text: tr('applications') });
   var cols = mk('div', { id: 'cols' }, [
     mk('div', { class: 'pane' }, [appsH4, col1]),
     mk('div', { class: 'pane' }, [mk('h4', { html: '&nbsp;' }), col2wrap])   // an empty heading keeps the two lists aligned
   ]);
   D.body.appendChild(cols);
-  D.body.appendChild(mk('div', { class: 'foot' }, [addBtn, remBtn]));
+  D.body.appendChild(mk('div', { class: 'foot' }, [addBtn, discoverBtn, remBtn, footMsg]));
+  function setFootMsg(t) { footMsg.textContent = t || ''; }
 
   function claimSummary(types) { var n = types.length; if (!n) return tr('none'); return (n === 1 ? tr('typeOne') : tr('typeMany')).replace('{n}', n); }
 
@@ -225,7 +240,7 @@
     var tbl = mk('table', {}, [tb]); col2wrap.textContent = ''; col2wrap.appendChild(tbl);
   }
 
-  function relabel() { if (c.setTitle) c.setTitle(tr('title')); appsH4.textContent = tr('applications'); addBtn.textContent = tr('add'); remBtn.textContent = tr('remove'); }
+  function relabel() { if (c.setTitle) c.setTitle(tr('title')); appsH4.textContent = tr('applications'); addBtn.textContent = tr('add'); discoverBtn.textContent = tr('discover'); remBtn.textContent = tr('remove'); }
   function renderAll() { renderApps(); renderTypes(); remBtn.disabled = !selApp; }
 
   /* ---- add / remove ---- */
@@ -247,6 +262,47 @@
     var i = cfg.apps.indexOf(selApp); if (i < 0) return;
     cfg.apps.splice(i, 1); delete manifests[appURIof(selApp)]; selApp = null;
     save().then(renderAll);
+  });
+
+  /* ---- discover: walk the home for application containers (any container holding index.js) and register the ones not
+     already listed. Home-relative paths with a trailing slash are stored, matching what Add app… records. ---- */
+  var SKIP = { 'prefs/': 1, 'rsrc/': 1, 'control_panels/': 1, 'trash/': 1, '.trash/': 1 };   // config, resource forks, panels, trash
+  async function listChildren(uri) {
+    var res = await fetch(uri + '?children', { headers: headers({ Accept: 'application/cdmi-container' }) });
+    if (!res.ok) return null;                                      // not a container, or unreadable
+    var rep = await res.json();
+    return Array.isArray(rep.children) ? rep.children : [];
+  }
+  async function discover() {
+    var found = [], budget = { n: 0 }, MAXDEPTH = 6;
+    async function walk(uri, rel, depth) {
+      if (depth > MAXDEPTH || budget.n > 2000) return;
+      var kids; try { kids = await listChildren(uri); } catch (e) { return; }
+      if (kids === null) return;
+      budget.n++;
+      if (kids.indexOf('index.js') >= 0) { found.push(rel); return; }   // an application; do not descend into it (rsrc/, etc.)
+      for (var i = 0; i < kids.length; i++) {
+        var name = kids[i];
+        if (!/\/$/.test(name)) continue;                           // containers only
+        if (SKIP[name.toLowerCase()] || name.charAt(0) === '.') continue;
+        await walk(uri + name, rel + name, depth + 1);
+      }
+    }
+    await walk(HOME, '', 0);
+    return found;
+  }
+  discoverBtn.addEventListener('click', function () {
+    discoverBtn.disabled = true; addBtn.disabled = true; setFootMsg(tr('scanning'));
+    discover().then(function (found) {
+      var added = 0;
+      found.forEach(function (rel) { if (cfg.apps.indexOf(rel) < 0) { cfg.apps.push(rel); added++; } });
+      discoverBtn.disabled = false; addBtn.disabled = false;
+      if (!added) { setFootMsg(tr('discNone')); return; }
+      setFootMsg((added === 1 ? tr('discOne') : tr('discMany')).replace('{n}', added));
+      save().then(loadAll).then(renderAll);
+    }).catch(function (e) {
+      discoverBtn.disabled = false; addBtn.disabled = false; setFootMsg('Scan failed: ' + e.message);
+    });
   });
 
   /* ---- dark mode + live locale ---- */

@@ -1,0 +1,10 @@
+[
+  { "name": "request", "alias": "X", "type": "String", "typeLabel": "<method>",
+    "description": "HTTP method to send: GET, HEAD, PUT, POST, PATCH, DELETE or OPTIONS. Mirrors curl's -X / --request." },
+  { "name": "header", "alias": "H", "type": "String", "multiple": true, "typeLabel": "<name: value>",
+    "description": "Add a request header; repeat the flag for several. A header set here overrides the desktop's own (e.g. Authorization). Mirrors curl's -H / --header." },
+  { "name": "data", "alias": "d", "type": "String", "typeLabel": "<body>",
+    "description": "Send this string as the request body. Implies POST unless --request is given. Mirrors curl's -d / --data." },
+  { "name": "url", "type": "String", "defaultOption": true, "typeLabel": "<uri>",
+    "description": "The request URI, given as the first non-option argument. Must be https." }
+]

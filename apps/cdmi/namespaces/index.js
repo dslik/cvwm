@@ -12,30 +12,10 @@
   var CTX = window.CDMI_CONTEXT || {};
   var D = CTX.desktop || {};
   var R = CTX.rsrc || null;
-  function S(id, fb) { var v = R && R.text('strings', id); return v == null ? fb : v; }
+  function S(id, vars) { var v = R && R.text('strings', id); if (v == null) return id; if (vars) for (var k in vars) v = v.split('{' + k + '}').join(vars[k]); return v; }
 
   var style = document.createElement('style');
-  var DEFAULT_CSS =
-    ':root{--fg:#1f2328;--muted:#59636e;--bg:#fff;--border:#d1d9e0;--code:#eff1f3;--link:#0969da;--ok:#1a7f37;--warn:#9a6700;}' +
-    '@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--fg:#e6edf3;--muted:#9198a1;--bg:#0d1117;--border:#3d444d;--code:#151b23;--link:#4493f8;--ok:#3fb950;--warn:#d29922;}}' +
-    'html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}' +
-    '#bar{display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--border);}' +
-    '#bar input{flex:1;min-width:0;font:13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);}' +
-    '#bar button{height:30px;padding:0 12px;font-size:13px;background:var(--code);color:var(--fg);border:1px solid var(--border);border-radius:6px;cursor:pointer;}' +
-    '#bar button:hover{border-color:var(--muted);}' +
-    '#body{padding:12px 14px;overflow:auto;}' +
-    '.msg{color:var(--muted);padding:24px 8px;text-align:center;}' +
-    '.ns{border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin:0 0 10px;}' +
-    '.ns .name{font-weight:600;}' +
-    '.ns .base{font:12px ui-monospace,monospace;color:var(--muted);word-break:break-all;margin:2px 0 6px;}' +
-    '.ns .tags{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 8px;}' +
-    '.tag{font-size:11px;padding:1px 7px;border-radius:10px;background:var(--code);color:var(--muted);}' +
-    '.tag.ok{color:var(--ok);}.tag.warn{color:var(--warn);}' +
-    '.ns .act{display:flex;gap:8px;align-items:center;}' +
-    '.ns button{height:28px;padding:0 12px;font-size:13px;background:var(--code);color:var(--fg);border:1px solid var(--border);border-radius:6px;cursor:pointer;}' +
-    '.ns button:hover:not(:disabled){border-color:var(--muted);}.ns button:disabled{opacity:.5;cursor:default;}' +
-    '.ns .note{font-size:12px;color:var(--muted);}';
-  style.textContent = (R && R.text('styles', 'namespaces')) || DEFAULT_CSS;
+  style.textContent = R.text('styles', 'namespaces');
   document.head.appendChild(style);
 
   function el(tag, props, kids) {
@@ -45,13 +25,18 @@
     return e;
   }
 
-  var input = el('input', { type: 'text', placeholder: S('origin-placeholder','https://host:port'), spellcheck: 'false' });
-  var goBtn = el('button', { type: 'button', text: S('discover','Discover') });
+  var input = el('input', { type: 'text', placeholder: S('origin-placeholder'), spellcheck: 'false' });
+  var goBtn = el('button', { type: 'button', text: S('discover') });
   var bar = el('div', { id: 'bar' }, [input, goBtn]);
   var body = el('div', { id: 'body' });
   document.body.appendChild(bar); document.body.appendChild(body);
+  // One light/dark setting serves the whole desktop: the shared cvwm.dark key in localStorage, which the desktop
+  // toggles (View > Dark mode) and every app follows by mirroring it onto body.dark.
+  function setDark(on) { document.body.classList.toggle('dark', !!on); }
+  try { setDark(localStorage.getItem('cvwm.dark') === 'on'); } catch (e) { /* no storage */ }
+  window.addEventListener('storage', function (ev) { if (ev.key === 'cvwm.dark') setDark(ev.newValue === 'on'); });
   if (CTX.resize) CTX.resize(680, 520);
-  if (CTX.setTitle) CTX.setTitle(S('title','namespaces'));
+  if (CTX.setTitle) CTX.setTitle(S('title'));
 
   // Default the origin to the desktop's own server, derived from any mounted disk's base URI.
   (function () {
@@ -69,33 +54,33 @@
   function show(list) {
     body.textContent = '';
     if (!list) return;
-    if (!list.namespaces.length) { body.appendChild(el('div', { class: 'msg', text: S('no-namespaces-prefix','No namespaces are advertised at ') + list.origin + S('no-namespaces-suffix','/.well-known/cdmi/cdmi_namespaces/.') })); return; }
+    if (!list.namespaces.length) { body.appendChild(el('div', { class: 'msg', text: S('no-namespaces-prefix') + list.origin + S('no-namespaces-suffix') })); return; }
     var mounted = mountedBases();
     list.namespaces.forEach(function (ns) {
       var tags = el('div', { class: 'tags' });
       if (ns.base) {
-        tags.appendChild(el('span', { class: 'tag' + (ns.tls ? ' ok' : ' warn'), text: ns.tls ? S('tag-tls','TLS') : S('tag-not-https','not https') }));
-        tags.appendChild(el('span', { class: 'tag' + (ns.sameOrigin ? ' ok' : ' warn'), text: ns.sameOrigin ? S('tag-same-origin','same origin') : S('tag-other-origin','other origin') }));
-        if (ns.locked) tags.appendChild(el('span', { class: 'tag warn', text: S('tag-locked','sign in to read') }));
+        tags.appendChild(el('span', { class: 'tag' + (ns.tls ? ' ok' : ' warn'), text: ns.tls ? S('tag-tls') : S('tag-not-https') }));
+        tags.appendChild(el('span', { class: 'tag' + (ns.sameOrigin ? ' ok' : ' warn'), text: ns.sameOrigin ? S('tag-same-origin') : S('tag-other-origin') }));
+        if (ns.locked) tags.appendChild(el('span', { class: 'tag warn', text: S('tag-locked') }));
       }
       var card = el('div', { class: 'ns' }, [
         el('div', { class: 'name', text: ns.name }),
-        el('div', { class: 'base', text: ns.base || S('no-base','(no base URI)') }),
+        el('div', { class: 'base', text: ns.base || S('no-base') }),
         tags
       ]);
       var act = el('div', { class: 'act' });
       if (!ns.base) {
-        act.appendChild(el('span', { class: 'note', text: ns.reason || S('reason-default','this reference does not lead to a base URI') }));
+        act.appendChild(el('span', { class: 'note', text: ns.reason || S('reason-default') }));
       } else if (!ns.tls) {
-        act.appendChild(el('span', { class: 'note', text: S('mounts-https-only','cvwm mounts only https: base URIs') }));
+        act.appendChild(el('span', { class: 'note', text: S('mounts-https-only') }));
       } else if (!ns.sameOrigin) {
-        act.appendChild(el('span', { class: 'note', text: S('mounts-same-origin','cvwm mounts only same-origin base URIs (spec 302)') }));
+        act.appendChild(el('span', { class: 'note', text: S('mounts-same-origin') }));
       } else if (mounted.indexOf(ns.base) >= 0) {
-        var b0 = el('button', { type: 'button', disabled: 'disabled', text: S('mounted','Mounted') }); act.appendChild(b0);
+        var b0 = el('button', { type: 'button', disabled: 'disabled', text: S('mounted') }); act.appendChild(b0);
       } else {
-        var b = el('button', { type: 'button', text: S('mount','Mount') });
+        var b = el('button', { type: 'button', text: S('mount') });
         b.addEventListener('click', function () {
-          if (D.mount && D.mount(ns.base, ns.name)) { b.textContent = S('mounted','Mounted'); b.disabled = true; }
+          if (D.mount && D.mount(ns.base, ns.name)) { b.textContent = S('mounted'); b.disabled = true; }
         });
         act.appendChild(b);
       }
@@ -106,15 +91,15 @@
 
   async function discover() {
     var origin = input.value.trim().replace(/\/+$/, '');
-    if (!/^https:\/\//i.test(origin)) { body.textContent = ''; body.appendChild(el('div', { class: 'msg', text: S('origin-help','A server origin is an https: URL, for example https://cdmi.example.local:9443') })); return; }
-    body.textContent = ''; body.appendChild(el('div', { class: 'msg', text: S('reading','Reading \u2026') }));
+    if (!/^https:\/\//i.test(origin)) { body.textContent = ''; body.appendChild(el('div', { class: 'msg', text: S('origin-help') })); return; }
+    body.textContent = ''; body.appendChild(el('div', { class: 'msg', text: S('reading') }));
     try {
-      if (!D.wellKnown) throw new Error(S('not-supported','this desktop does not support namespace discovery'));
+      if (!D.wellKnown) throw new Error(S('not-supported'));
       var list = await D.wellKnown(origin);
       show(list);
     } catch (e) {
       body.textContent = '';
-      body.appendChild(el('div', { class: 'msg', html: S('could-not-read-prefix','Could not read the namespaces at ') + '<code>' + origin + '</code><br><br>' + (e && e.message ? String(e.message) : S('no-answer','The server did not answer.')) }));
+      body.appendChild(el('div', { class: 'msg', html: S('could-not-read-prefix') + '<code>' + origin + '</code><br><br>' + (e && e.message ? String(e.message) : S('no-answer')) }));
     }
   }
 

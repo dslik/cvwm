@@ -19,42 +19,15 @@
   // built-in default below and the app runs exactly as before. S() reads a string (with an optional {d}-style token),
   // and the stylesheet is pulled from the fork where present further down.
   var R = CTX.rsrc || null;
-  function S(id, fb, vars) {
-    var v = R && R.text('strings', id); if (v == null) v = fb;
+  function S(id, vars) {
+    var v = R && R.text('strings', id); if (v == null) return id;
     if (vars) for (var k in vars) v = v.split('{' + k + '}').join(vars[k]);
     return v;
   }
 
   // ---- style (house tokens shared with relationships/namespaces) -----------------------------------------------------
   var style = document.createElement('style');
-  var DEFAULT_CSS =
-    ':root{--fg:#1f2328;--muted:#59636e;--bg:#fff;--panel:#f6f8fa;--border:#d1d9e0;--code:#eff1f3;--accent:#0969da;--ok:#1a7f37;--err:#cf222e;--dom:#8250df;--host:#0969da;--ns:#1a7f37;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;}' +
-    '@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--fg:#e6edf3;--muted:#9198a1;--bg:#0d1117;--panel:#151b23;--border:#3d444d;--code:#151b23;--accent:#4493f8;--ok:#3fb950;--err:#f85149;--dom:#c297ff;--host:#4493f8;--ns:#3fb950;}}' +
-    'html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;}' +
-    'body{display:flex;flex-direction:column;}' +
-    '#top{flex:none;display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border);}' +
-    '#top label{font:11px var(--mono);color:var(--muted);flex:none;}' +
-    '#top input{flex:1 1 0;min-width:0;height:28px;box-sizing:border-box;font:12px var(--mono);padding:0 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);}' +
-    '#top button{height:28px;flex:none;padding:0 12px;border:1px solid var(--border);border-radius:6px;background:var(--code);color:var(--fg);cursor:pointer;font-size:12px;}' +
-    '#top button.go{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600;}' +
-    '#cols{flex:1;min-height:0;display:flex;overflow-x:auto;}' +
-    '.col{flex:1 1 0;min-width:210px;border-right:1px solid var(--border);display:flex;flex-direction:column;}' +
-    '.col:last-child{border-right:0;}.col:nth-child(even){background:var(--panel);}' +
-    '.col-h{flex:none;padding:5px 10px;font:600 10px var(--mono);letter-spacing:.03em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
-    '.col-b{flex:1;overflow-y:auto;padding:3px 0;}' +
-    '.row{display:flex;align-items:center;gap:8px;padding:5px 9px 5px 10px;cursor:pointer;font:12px var(--mono);color:var(--fg);border:0;background:none;width:100%;text-align:left;box-sizing:border-box;}' +
-    '.row:hover{background:var(--code);}.row.sel{background:var(--accent);color:#fff;}' +
-    '.row.sel .sub,.row.sel .chev{color:rgba(255,255,255,.85);}' +
-    '.row .nm{flex:1;min-width:0;overflow:hidden;}.row .nm .t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
-    '.row .sub{color:var(--muted);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
-    '.row .chev{flex:none;color:var(--muted);}' +
-    '.dot{flex:none;width:9px;height:9px;border-radius:50%;}.dot.dom{background:var(--dom);}.dot.host{background:var(--host);border-radius:2px;}.dot.ns{background:var(--ns);}' +
-    '.mount{flex:none;border:1px solid var(--accent);background:var(--accent);color:#fff;border-radius:6px;font:10px var(--mono);padding:2px 9px;cursor:pointer;}' +
-    '.mount.done{background:var(--code);color:var(--muted);border-color:var(--border);cursor:default;}.row.sel .mount{border-color:#fff;}' +
-    '.empty{color:var(--muted);font:11px var(--mono);padding:10px;}.empty.err{color:var(--err);}' +
-    '#status{flex:none;padding:5px 10px;border-top:1px solid var(--border);font:11px var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}#status .ok{color:var(--ok);}#status .err{color:var(--err);}' +
-    '#legend{flex:none;display:flex;gap:16px;padding:5px 10px;border-top:1px solid var(--border);font:11px var(--mono);color:var(--muted);flex-wrap:wrap;}#legend span{display:flex;align-items:center;gap:6px;}';
-  style.textContent = (R && R.text('styles', 'servers')) || DEFAULT_CSS;
+  style.textContent = R.text('styles', 'servers');
   document.head.appendChild(style);
 
   function el(t, c, txt) { var e = document.createElement(t); if (c) e.className = c; if (txt != null) e.textContent = txt; return e; }
@@ -62,20 +35,20 @@
 
   // ---- header: editable, pre-filled DoH resolver + Rescan (no title label) ---------------------------------------
   var resolverIn = el('input'); resolverIn.type = 'text'; resolverIn.spellcheck = false;
-  resolverIn.placeholder = S('resolverPlaceholder', 'DoH resolver URL, e.g. https://resolver.example/dns-query');
-  var rescan = el('button', 'go'); rescan.type = 'button'; rescan.textContent = S('rescan', 'Rescan');
+  resolverIn.placeholder = S('resolverPlaceholder');
+  var rescan = el('button', 'go'); rescan.type = 'button'; rescan.textContent = S('rescan');
   var top = el('div'); top.id = 'top';
-  top.appendChild(el('label', null, S('doh', 'DoH'))); top.appendChild(resolverIn); top.appendChild(rescan);
+  top.appendChild(el('label', null, S('doh'))); top.appendChild(resolverIn); top.appendChild(rescan);
   var colsEl = el('div'); colsEl.id = 'cols';
-  var statusEl = el('div'); statusEl.id = 'status'; statusEl.textContent = S('starting', 'Starting …');
+  var statusEl = el('div'); statusEl.id = 'status'; statusEl.textContent = S('starting');
   var legend = el('div'); legend.id = 'legend';
   function legItem(cls, txt) { var s = el('span'); s.appendChild(el('i', 'dot ' + cls)); s.appendChild(document.createTextNode(' ' + txt)); return s; }
-  legend.appendChild(legItem('dom', S('legendDomain', 'browsing domain')));
-  legend.appendChild(legItem('host', S('legendHost', 'CDMI host (_cdmi._tcp)')));
-  legend.appendChild(legItem('ns', S('legendNs', 'namespace (well-known)')));
+  legend.appendChild(legItem('dom', S('legendDomain')));
+  legend.appendChild(legItem('host', S('legendHost')));
+  legend.appendChild(legItem('ns', S('legendNs')));
   document.body.appendChild(top); document.body.appendChild(colsEl); document.body.appendChild(statusEl); document.body.appendChild(legend);
   if (CTX.resize) CTX.resize(920, 560);
-  if (CTX.setTitle) CTX.setTitle(S('title', 'servers'));
+  if (CTX.setTitle) CTX.setTitle(S('title'));
 
   function setStatus(t, cls) { statusEl.innerHTML = ''; statusEl.appendChild(el('span', cls || '', t)); }
 
@@ -185,7 +158,7 @@
   }
   async function namespacesOf(origin) {
     if (cache.ns[origin]) return cache.ns[origin];
-    if (!D.wellKnown) throw new Error(S('noDiscovery', 'this desktop does not support namespace discovery'));
+    if (!D.wellKnown) throw new Error(S('noDiscovery'));
     var listed = await D.wellKnown(origin);
     var out = ((listed && listed.namespaces) || []).filter(function (n) { return n && n.base && n.tls !== false; });
     cache.ns[origin] = out; return out;
@@ -199,7 +172,7 @@
     if (opts.dot) r.appendChild(el('i', 'dot ' + opts.dot));
     var nm = el('div', 'nm'); nm.appendChild(el('div', 't', opts.name)); if (opts.sub) nm.appendChild(el('div', 'sub', opts.sub)); r.appendChild(nm);
     if (opts.mount !== undefined) {
-      var mb = el('button', 'mount' + (opts.mounted ? ' done' : ''), opts.mounted ? S('mounted', 'Mounted') : S('mount', 'Mount'));
+      var mb = el('button', 'mount' + (opts.mounted ? ' done' : ''), opts.mounted ? S('mounted') : S('mount'));
       if (!opts.mounted) mb.addEventListener('click', function (ev) { ev.stopPropagation(); opts.mount(mb); });
       r.appendChild(mb);
     } else if (opts.chev) r.appendChild(el('span', 'chev', '›'));
@@ -209,20 +182,20 @@
   // Each column memoizes its element so an async fill can drop in without redrawing siblings.
   function render() {
     colsEl.textContent = '';
-    var c1 = col(S('colDomains', 'DNS Domains'));
-    if (!resolver()) { c1._b.appendChild(el('div', 'empty', S('emptyResolver', 'Enter a DoH resolver URL above, then Rescan.'))); colsEl.appendChild(c1); colsEl.appendChild(col(S('colHosts', 'Hosts'))); colsEl.appendChild(col(S('colNamespaces', 'Namespaces'))); return; }
+    var c1 = col(S('colDomains'));
+    if (!resolver()) { c1._b.appendChild(el('div', 'empty', S('emptyResolver'))); colsEl.appendChild(c1); colsEl.appendChild(col(S('colHosts'))); colsEl.appendChild(col(S('colNamespaces'))); return; }
     fill(c1._b, domainList(), function (domains) {
-      if (!domains.length) return [el('div', 'empty', S('emptyNoDomains', 'No browsing domains.'))];
+      if (!domains.length) return [el('div', 'empty', S('emptyNoDomains'))];
       return domains.map(function (d) {
         return row({ name: d, dot: 'dom', chev: true, sel: d === sel.domain, onClick: function () { sel.domain = d; sel.host = null; setStatus('PTR _cdmi._tcp.' + d); render(); } });
       });
     });
     colsEl.appendChild(c1);
 
-    var c2 = col(sel.domain ? S('colHosts', 'Hosts') + ' · ' + sel.domain : S('colHosts', 'Hosts'));
-    if (!sel.domain) c2._b.appendChild(el('div', 'empty', S('emptySelectDomain', 'Select a domain.')));
+    var c2 = col(sel.domain ? S('colHosts') + ' · ' + sel.domain : S('colHosts'));
+    if (!sel.domain) c2._b.appendChild(el('div', 'empty', S('emptySelectDomain')));
     else fill(c2._b, hostsIn(sel.domain), function (hosts) {
-      if (!hosts.length) return [el('div', 'empty', S('emptyNoHosts', 'No CDMI hosts advertised in {d}.', { d: sel.domain }))];
+      if (!hosts.length) return [el('div', 'empty', S('emptyNoHosts', { d: sel.domain }))];
       return hosts.map(function (h) {
         return row({ name: h.name, sub: h.origin.replace(/^https:\/\//, '') + (h.ver ? '  · ' + h.ver : ''), dot: 'host', chev: true, sel: sel.host && sel.host.origin === h.origin,
           onClick: function () { sel.host = h; setStatus('GET ' + h.origin + '/.well-known/cdmi/cdmi_namespaces/'); render(); } });
@@ -230,10 +203,10 @@
     });
     colsEl.appendChild(c2);
 
-    var c3 = col(sel.host ? S('colNamespaces', 'Namespaces') + ' · ' + sel.host.name : S('colNamespaces', 'Namespaces'));
-    if (!sel.host) c3._b.appendChild(el('div', 'empty', S('emptySelectHost', 'Select a host.')));
+    var c3 = col(sel.host ? S('colNamespaces') + ' · ' + sel.host.name : S('colNamespaces'));
+    if (!sel.host) c3._b.appendChild(el('div', 'empty', S('emptySelectHost')));
     else fill(c3._b, namespacesOf(sel.host.origin), function (list) {
-      if (!list.length) return [el('div', 'empty', S('emptyNoNamespaces', 'This host advertises no namespaces.'))];
+      if (!list.length) return [el('div', 'empty', S('emptyNoNamespaces'))];
       var have = mountedBases();
       return list.map(function (n) {
         var isMounted = have.indexOf(n.base.replace(/\/$/, '')) >= 0;
@@ -249,7 +222,7 @@
   }
   // Fill a column body from a promise: show "Reading ..." until it resolves, then the produced rows.
   function fill(body, promise, toRows) {
-    body.appendChild(el('div', 'empty', S('reading', 'Reading …')));
+    body.appendChild(el('div', 'empty', S('reading')));
     Promise.resolve(promise).then(function (v) {
       body.textContent = ''; toRows(v).forEach(function (n) { body.appendChild(n); });
     }, function (e) {
@@ -259,12 +232,12 @@
   }
 
   async function start() {
-    setStatus(S('readingBoot', 'Reading cdmi_domain_doh on the root domain …'));
+    setStatus(S('readingBoot'));
     boot = await readBoot();
     if (boot.resolver) resolverIn.value = boot.resolver;
     cache = { domains: null, hosts: {}, ns: {} };
     if (resolver()) setStatus('DoH resolver ' + resolver() + (boot.browse_domains.length ? '  ·  seeds: ' + boot.browse_domains.join(', ') : ''));
-    else setStatus(S('noBootItem', 'No cdmi_domain_doh item; enter a DoH resolver URL and Rescan.'));
+    else setStatus(S('noBootItem'));
     render();
   }
   rescan.addEventListener('click', function () { sel = { domain: null, host: null }; cache = { domains: null, hosts: {}, ns: {} }; setStatus('Rescanning with ' + (resolver() || '(no resolver)')); render(); });

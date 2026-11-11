@@ -37,5 +37,22 @@
   "kind-data": "Data object",
   "kind-file-suffix": " file",
   "found-one": " item found",
-  "found-many": " items found"
+  "found-many": " items found",
+  "cancel": "Cancel",
+  "no-engine": "The query engine resource (code/engine) is not installed.",
+  "save": "Save",
+  "save-choose": "Choose…",
+  "save-empty": "build a query first",
+  "save-in": "in:",
+  "save-name": "folder name",
+  "save-need-name": "enter a name",
+  "save-title": "Save as Smart Folder",
+  "save-sf": "Save as Smart Folder…",
+  "save-sf-title": "Save this search as a smart folder",
+  "save-no-resources": "smart-folder resources are not installed",
+  "save-no-picker": "no picker available",
+  "save-pick": "Choose a container",
+  "saving": "saving…",
+  "refresh": "↻ Refresh",
+  "sf-title": "smart folder"
 }

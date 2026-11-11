@@ -23,9 +23,12 @@
     'user-select:none;-webkit-user-select:none}' +
     '.fv-form{flex:1;padding:14px 16px;display:flex;flex-direction:column;gap:12px;overflow:auto;box-sizing:border-box}' +
     '.fv-form p{margin:0;line-height:18px}' +
-    '.row{display:flex;align-items:flex-start;gap:12px}' +
-    '.mark{flex:none;width:52px;height:52px;border:2px solid;border-color:var(--dk) var(--lt) var(--lt) var(--dk);' +
-    'background:#7d93a8;display:flex;align-items:center;justify-content:center;color:#f5f8fa;font:italic 700 18px var(--sans)}' +
+    '.about{display:flex;align-items:flex-start;gap:14px}' +
+    '.about-icon{flex:none;width:48px;height:48px}.about-icon img{width:48px;height:48px;display:block;object-fit:contain}' +
+    '.about-icon .mark{width:48px;height:48px;box-sizing:border-box;border:2px solid;border-color:var(--dk) var(--lt) var(--lt) var(--dk);' +
+    'background:#7d93a8;display:flex;align-items:center;justify-content:center;color:#f5f8fa;font:italic 700 16px var(--sans)}' +
+    '.about-text{min-width:0}.about-text h3{margin:0 0 1px;font:700 18px var(--sans)}' +
+    '.about-text .ver{margin:0 0 8px;color:#555;font-weight:700}.about-text p{margin:0;line-height:18px}' +
     '.fv-row.end{display:flex;justify-content:flex-end;gap:6px;margin-top:auto}' +
     '.fv-btn{min-width:84px;height:28px;padding:0 12px;background:var(--grey);font:700 13px var(--sans);color:#000;' +
     'border:2px solid;border-color:var(--lt) var(--dk) var(--dk) var(--lt)}' +
@@ -43,15 +46,31 @@
   var ok = el('button', { class: 'fv-btn', type: 'button', 'data-autofocus': '' }, ['OK']);
   ok.addEventListener('click', function () { if (CTX.close) CTX.close(); });
 
+  // The icon is the desktop's own, passed in by cvwm as CTX.iconURL (the same image the file browser shows for this
+  // container). Fall back to a bevelled "cvwm" mark where it is not available, so the box still reads as cvwm's.
+  var iconBox = el('div', { class: 'about-icon' });
+  if (CTX.iconURL) {
+    var img = el('img', { alt: '' });
+    img.addEventListener('error', function () { iconBox.textContent = ''; iconBox.appendChild(el('div', { class: 'mark', 'aria-hidden': 'true' }, ['cvwm'])); });
+    img.setAttribute('src', CTX.iconURL);
+    iconBox.appendChild(img);
+  } else {
+    iconBox.appendChild(el('div', { class: 'mark', 'aria-hidden': 'true' }, ['cvwm']));
+  }
+
   document.body.appendChild(el('div', { class: 'fv-form' }, [
-    el('div', { class: 'row' }, [
-      el('div', { class: 'mark', 'aria-hidden': 'true' }, ['cvwm']),
-      el('p', { text: 'This application provides the desktop, and cannot be run from within the desktop.' })
+    el('div', { class: 'about' }, [
+      iconBox,
+      el('div', { class: 'about-text' }, [
+        el('h3', { text: 'cvwm' }),
+        el('p', { class: 'ver', text: CTX.cvwmVersion ? 'Version ' + CTX.cvwmVersion : 'Version' }),
+        el('p', { text: 'This application provides the desktop, and cannot be run from within the desktop.' })
+      ])
     ]),
     el('div', { class: 'fv-row end' }, [ok])
   ]));
 
   if (CTX.setTitle) CTX.setTitle('cvwm');
-  if (CTX.resize) CTX.resize(420, 180);
+  if (CTX.resize) CTX.resize(440, 200);
   ok.focus();
 })();

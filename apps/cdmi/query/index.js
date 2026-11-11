@@ -25,7 +25,7 @@
   // built-in default below and the app runs exactly as before. S() reads a string; data tables and the stylesheet and
   // icons are pulled where present further down.
   var R = CTX.rsrc || null;
-  function S(id, fb) { var v = R && R.text('strings', id); return v == null ? fb : v; }
+  function S(id, vars) { var v = R && R.text('strings', id); if (v == null) return id; if (vars) for (var k in vars) v = v.split('{' + k + '}').join(vars[k]); return v; }
   function slash(u) { return u && !/\/$/.test(u) ? u + '/' : u; }
   var CONTAINER = slash(CTX.containerURI || CTX.baseURI || '');
   var BASE = slash(CTX.baseURI || CONTAINER);           // the disk base the app is on (a home may be a sub-path of the root)
@@ -34,7 +34,7 @@
   // only builds the scope and hands it to engine.run(). A smart folder loads the same engine from its own fork.
   var engine = null;
 
-  if (CTX.setTitle) CTX.setTitle(S('title', 'query'));
+  if (CTX.setTitle) CTX.setTitle(S('title'));
   if (CTX.resize) CTX.resize(720, 512);
 
   var FIELDS = [
@@ -70,54 +70,8 @@
 
   // ---- look: cvwm's own tokens and component rules, reproduced for this iframe document ----
   var style = document.createElement('style');
-  var DEFAULT_CSS =
-    ':root{--std:#60a0c0;--hi:#c06077;--grey:#bfbfbf;--lt:rgba(255,255,255,.6);--dk:rgba(0,0,0,.55);' +
-    '--line:rgba(0,0,0,.28);--panel:#b4b4b4;--muted:#555;' +
-    '--sans:Helvetica,"Nimbus Sans","Liberation Sans",Arial,sans-serif;--mono:"DejaVu Sans Mono","Liberation Mono",Menlo,Consolas,monospace}' +
-    'html,body{margin:0;height:100%}' +
-    'body{display:flex;flex-direction:column;background:var(--grey);color:#000;font:13px/1.3 var(--sans)}' +
-    '.bar{display:flex;align-items:center;gap:6px;padding:6px;flex:none}.bar .lab{font:11px var(--sans);color:#444}.sp{flex:1}' +
-    // buttons -- .fv-btn / .fv-btn.sm
-    '.fv-btn{min-width:0;height:28px;padding:0 12px;background:var(--grey);font:700 13px var(--sans);color:#000;border:2px solid;border-color:var(--lt) var(--dk) var(--dk) var(--lt);white-space:nowrap}' +
-    '.fv-btn:active{border-color:var(--dk) var(--lt) var(--lt) var(--dk)}' +
-    '.fv-btn:focus-visible{outline:1px solid #000;outline-offset:2px}' +
-    '.fv-btn.sm{height:22px;padding:0 8px;font-size:12px}' +
-    '.fv-btn:disabled{color:#7a7a7a;text-shadow:1px 1px 0 rgba(255,255,255,.6)}' +
-    '.rm{flex:none;width:26px;padding:0;font-weight:700}' +
-    // fields -- .fv-in (inputs and selects)
-    '.fv-in{height:26px;padding:0 6px;background:#fff;color:#000;font:13px var(--mono);border:2px solid;border-color:var(--dk) var(--lt) var(--lt) var(--dk);box-sizing:border-box}' +
-    '.fv-in:focus{outline:1px solid #000}' +
-    // selects rendered as cvwm controls (not the browser default): flat, square, sans, with a cvwm-style caret
-    'select.fv-in{-webkit-appearance:none;-moz-appearance:none;appearance:none;height:26px;padding:0 22px 0 6px;font:13px var(--sans);border-radius:0;' +
-    'background:#fff url(\'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="9" height="6"><path d="M0 0h9L4.5 6z" fill="%23000"/></svg>\') no-repeat right 7px center}' +
-    'select.fv-in::-ms-expand{display:none}' +
-    '.scoperoot{max-width:280px;overflow:hidden;text-overflow:ellipsis}' +
-    // scope: bordered condition panels, like the ACL builder's .fv-acl-ace
-    '.scope{padding:6px 6px 2px;flex:none;overflow:auto;max-height:46%}' +
-    '.grp{border:1px solid var(--line);border-radius:4px;padding:8px;background:var(--panel);display:flex;flex-direction:column;gap:6px;margin-bottom:6px}' +
-    '.gh{font:700 11px var(--sans);color:var(--muted)}' +
-    '.stmt{display:flex;gap:6px;align-items:center}' +
-    '.stmt .join{width:34px;flex:none;text-align:right;font:11px var(--sans);color:var(--muted)}' +
-    '.stmt .field{flex:none;width:118px}.stmt .op{flex:none;width:140px}.stmt .val{flex:1;min-width:0}.stmt .mkey{flex:none;width:120px}' +
-    '.ordiv{display:flex;align-items:center;gap:8px;color:var(--muted);font:700 11px var(--sans);margin:0 2px 6px}.ordiv .ln{flex:1;height:0;border-top:1px solid #8a8a8a}' +
-    // results list -- .fv-lhead header + monospace rows with black selection, as the container browser's list view
-    '.res{flex:1;min-height:0;background:#fff;border:2px solid;border-color:var(--dk) var(--lt) var(--lt) var(--dk);margin:0 6px;display:flex;flex-direction:column;overflow:hidden}' +
-    '.lhead{display:grid;grid-template-columns:' + COLS + ';align-items:center;column-gap:8px;padding:0 8px;position:sticky;top:0;z-index:1;background:var(--grey);border-bottom:1px solid var(--dk);height:22px;flex:none}' +
-    '.lhead>div{font:700 11px var(--sans);color:#000;line-height:22px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.lhead .num{text-align:right}' +
-    '.rows{flex:1;overflow:auto}' +
-    '.item{display:grid;grid-template-columns:' + COLS + ';align-items:center;column-gap:8px;padding:0 8px;height:22px;border-bottom:1px solid #eee;cursor:default}' +
-    '.item>span{font:12px/22px var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
-    '.item .nm{display:flex;align-items:center;gap:5px;min-width:0}.item .nm span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
-    '.item .num{text-align:right}.item .loc{color:#555}' +
-    '.item.sel{background:#000}.item.sel span{color:#fff}.item.sel .loc{color:#cfcfcf}.item.sel svg{filter:invert(1)}' +
-    '.ic{width:16px;height:16px;flex:none}' +
-    '.rel{display:flex;align-items:center}.rel .barfill{width:100%;height:3px;background:#7fb0d8;border:1px solid #4d7ea6;border-radius:2px}.item.sel .rel .barfill{background:#fff;border-color:#fff}' +
-    '.empty{padding:14px;color:#8a8a8a;font:12px var(--mono)}' +
-    '.foot{flex:none;border-top:2px solid;border-color:var(--dk) var(--lt) var(--lt) var(--dk);padding:5px 8px;display:flex;align-items:center;gap:10px;font:11px var(--sans);color:#333}' +
-    '.foot .path{font:11px var(--mono);color:#222;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.foot .cnt{font-weight:700}' +
-    '.foot .st{font-weight:700}.foot .st.run{color:#8a5a00}.foot .st.ok{color:#2a7d3a}.foot .st.err{color:#a00}';
   // The stylesheet from the app fork (styles/query) where present, else the built-in default above.
-  style.textContent = (R && R.text('styles', 'query')) || DEFAULT_CSS;
+  style.textContent = R.text('styles', 'query');
   document.head.appendChild(style);
 
   function el(tag, cls, txt) { var e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
@@ -130,15 +84,15 @@
   groups.push(newGroup());
 
   var scopeRootNs = '';
-  var scopeRootLabel = S('everywhere', 'Everywhere on this server');
+  var scopeRootLabel = S('everywhere');
 
   // ---- toolbar ----
   var bar = el('div', 'bar');
-  var findInBtn = btn('sm scoperoot', S('find-in-prefix', 'in: ') + scopeRootLabel + '  ▾'); findInBtn.title = S('find-in-title', 'Choose a container to search within');
-  var clrRoot = btn('sm rm', '×'); clrRoot.title = S('clear-root-title', 'Search everywhere on this server'); clrRoot.style.display = 'none';
-  var findBtn = btn('find', S('find', 'Find'));
-  var saveBtn = btn('sm', S('save-sf', 'Save as Smart Folder…')); saveBtn.title = S('save-sf-title', 'Save this search as a smart folder');
-  bar.appendChild(el('span', 'lab', S('find', 'Find'))); bar.appendChild(findInBtn); bar.appendChild(clrRoot);
+  var findInBtn = btn('sm scoperoot', S('find-in-prefix') + scopeRootLabel + '  ▾'); findInBtn.title = S('find-in-title');
+  var clrRoot = btn('sm rm', '×'); clrRoot.title = S('clear-root-title'); clrRoot.style.display = 'none';
+  var findBtn = btn('find', S('find'));
+  var saveBtn = btn('sm', S('save-sf')); saveBtn.title = S('save-sf-title');
+  bar.appendChild(el('span', 'lab', S('find'))); bar.appendChild(findInBtn); bar.appendChild(clrRoot);
   bar.appendChild(el('span', 'sp')); bar.appendChild(saveBtn); bar.appendChild(findBtn);
 
   var scopeEl = el('div', 'scope');
@@ -153,26 +107,26 @@
   function drawScope() {
     scopeEl.textContent = '';
     groups.forEach(function (g, gi) {
-      if (gi > 0) { var od = el('div', 'ordiv'); od.appendChild(el('span', 'ln')); od.appendChild(document.createTextNode(S('or', 'OR'))); od.appendChild(el('span', 'ln')); scopeEl.appendChild(od); }
+      if (gi > 0) { var od = el('div', 'ordiv'); od.appendChild(el('span', 'ln')); od.appendChild(document.createTextNode(S('or'))); od.appendChild(el('span', 'ln')); scopeEl.appendChild(od); }
       var box = el('div', 'grp');
-      box.appendChild(el('div', 'gh', S('match-all', 'Match all of:')));
+      box.appendChild(el('div', 'gh', S('match-all')));
       g.conds.forEach(function (c, ci) {
         var row = el('div', 'stmt');
-        row.appendChild(el('span', 'join', ci === 0 ? S('where', 'where') : S('and', 'and')));
+        row.appendChild(el('span', 'join', ci === 0 ? S('where') : S('and')));
         row.appendChild(selWith('field', FIELDS, c.field, function (v) { c.field = v; if (v === 'cvwm_tags' && opOf(c.op).tok !== 'tag') c.op = 'tag'; drawScope(); }));
         if (c.field === '_metakey') {
-          var mk = el('input', 'fv-in mkey'); mk.type = 'text'; mk.placeholder = S('metakey-placeholder', 'metadata key'); mk.value = c.metakey;
+          var mk = el('input', 'fv-in mkey'); mk.type = 'text'; mk.placeholder = S('metakey-placeholder'); mk.value = c.metakey;
           mk.oninput = function () { c.metakey = mk.value; };
           row.appendChild(mk);
         }
         row.appendChild(selWith('op', OPS, c.op, function (v) { c.op = v; drawScope(); }));
         if (!NO_CONST[c.op]) {
-          var val = el('input', 'fv-in val'); val.type = 'text'; val.value = c.value; val.placeholder = S('value-placeholder', 'value');
+          var val = el('input', 'fv-in val'); val.type = 'text'; val.value = c.value; val.placeholder = S('value-placeholder');
           val.oninput = function () { c.value = val.value; };
           val.onkeydown = function (e) { if (e.key === 'Enter') runFind(); };
           row.appendChild(val);
         } else { row.appendChild(el('span', 'sp')); }
-        var rm = btn('sm rm', '–'); rm.title = S('remove', 'remove');
+        var rm = btn('sm rm', '–'); rm.title = S('remove');
         rm.onclick = function () {
           g.conds.splice(ci, 1);
           if (g.conds.length === 0) { groups.splice(gi, 1); if (groups.length === 0) groups.push(newGroup()); }
@@ -181,12 +135,12 @@
         row.appendChild(rm);
         box.appendChild(row);
       });
-      var addc = btn('sm addc', S('add-and', '+ and…')); addc.style.alignSelf = 'flex-start';
+      var addc = btn('sm addc', S('add-and')); addc.style.alignSelf = 'flex-start';
       addc.onclick = function () { g.conds.push(newCond()); drawScope(); };
       box.appendChild(addc);
       scopeEl.appendChild(box);
     });
-    var addg = btn('sm addg', S('add-or', '+ add “or” group'));
+    var addg = btn('sm addg', S('add-or'));
     addg.onclick = function () { groups.push(newGroup()); drawScope(); };
     scopeEl.appendChild(addg);
   }
@@ -200,14 +154,14 @@
     document.body.appendChild(e); findBtn.disabled = true;
   }
   (function loadEngine() {
-    if (!(R && R.module)) { showEngineError(S('no-engine', 'The query engine resource (code/engine) is not installed.')); return; }
+    if (!(R && R.module)) { showEngineError(S('no-engine')); return; }
     R.module('code', 'engine').then(function (mod) {
       engine = (mod.createEngine || mod.default)({
         headers: HDRS, desktop: D, rsrc: R, container: CONTAINER, base: BASE, home: HOME, S: S,
         onBusy: function (b) { findBtn.disabled = b; }
       });
       document.body.appendChild(engine.el);
-    }, function (e) { showEngineError(S('no-engine', 'The query engine resource (code/engine) is not installed.') + ' ' + (e && e.message || e)); });
+    }, function (e) { showEngineError(S('no-engine') + ' ' + (e && e.message || e)); });
   })();
 
   var terms = [];
@@ -249,20 +203,20 @@
   // ---- Find in: choose a container to scope to (a subtree of this server) ----
   findInBtn.onclick = async function () {
     if (!D.pickObject) return;
-    var picked = await D.pickObject({ title: S('find-in-dialog','Find in…') });
+    var picked = await D.pickObject({ title: S('find-in-dialog') });
     if (!picked) return;
     var u = String(picked);
-    if (u.indexOf(BASE) !== 0) { if (engine) engine.setStatus('err', S('pick-container','pick a container on this server')); return; }
+    if (u.indexOf(BASE) !== 0) { if (engine) engine.setStatus('err', S('pick-container')); return; }
     var rest = u.slice(BASE.length).split('?')[0];
     if (!/\/$/.test(rest)) rest = rest.replace(/[^/]*$/, '');
     scopeRootNs = '/' + rest;
     scopeRootLabel = scopeRootNs;
-    findInBtn.textContent = S('find-in-prefix','in: ') + scopeRootLabel + '  ▾';
+    findInBtn.textContent = S('find-in-prefix') + scopeRootLabel + '  ▾';
     clrRoot.style.display = '';
   };
   clrRoot.onclick = function () {
-    scopeRootNs = ''; scopeRootLabel = S('everywhere', 'Everywhere on this server');
-    findInBtn.textContent = S('find-in-prefix','in: ') + scopeRootLabel + '  ▾';
+    scopeRootNs = ''; scopeRootLabel = S('everywhere');
+    findInBtn.textContent = S('find-in-prefix') + scopeRootLabel + '  ▾';
     clrRoot.style.display = 'none';
   };
 
@@ -281,7 +235,7 @@
   async function createSmartFolder(destContainer, name, scope) {
     var bootstrap = R && R.text('code', 'bootstrap');
     var engineSrc = R && R.text('code', 'engine');
-    if (!bootstrap || !engineSrc) throw new Error(S('save-no-resources', 'smart-folder resources are not installed'));
+    if (!bootstrap || !engineSrc) throw new Error(S('save-no-resources'));
     var dest = slash(destContainer) + encodeURIComponent(name) + '/';
     var r = await put(dest, 'application/cdmi-container', { metadata: { cvwm_query: scope } });   // the folder, carrying the scope
     if (!okStatus(r.status)) throw new Error('create ' + name + ' — HTTP ' + r.status);
@@ -295,31 +249,31 @@
   }
   function openSaveDialog() {
     var scope = buildScope();
-    if (!scope.length) { if (engine) engine.setStatus('err', S('save-empty', 'build a query first')); return; }
+    if (!scope.length) { if (engine) engine.setStatus('err', S('save-empty')); return; }
     var loc = HOME || BASE;
     var ov = el('div'); ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;z-index:1000';
     var box = el('div'); box.style.cssText = 'background:#bfbfbf;border:2px solid;border-color:rgba(255,255,255,.6) rgba(0,0,0,.55) rgba(0,0,0,.55) rgba(255,255,255,.6);padding:12px;width:360px;max-width:92%;display:flex;flex-direction:column;gap:8px;font:13px Helvetica,Arial,sans-serif';
-    box.appendChild(el('div', '', S('save-title', 'Save as Smart Folder')));
-    var nameIn = el('input', 'fv-in'); nameIn.type = 'text'; nameIn.placeholder = S('save-name', 'folder name'); nameIn.style.width = '100%'; nameIn.style.boxSizing = 'border-box';
+    box.appendChild(el('div', '', S('save-title')));
+    var nameIn = el('input', 'fv-in'); nameIn.type = 'text'; nameIn.placeholder = S('save-name'); nameIn.style.width = '100%'; nameIn.style.boxSizing = 'border-box';
     box.appendChild(nameIn);
     var locRow = el('div'); locRow.style.cssText = 'display:flex;gap:6px;align-items:center';
     var locEl = el('span'); locEl.style.cssText = 'flex:1;font:11px "DejaVu Sans Mono",monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'; locEl.textContent = loc;
-    var chooseBtn = btn('sm', S('save-choose', 'Choose…'));
-    locRow.appendChild(el('span', '', S('save-in', 'in:'))); locRow.appendChild(locEl); locRow.appendChild(chooseBtn);
+    var chooseBtn = btn('sm', S('save-choose'));
+    locRow.appendChild(el('span', '', S('save-in'))); locRow.appendChild(locEl); locRow.appendChild(chooseBtn);
     box.appendChild(locRow);
     var msg = el('div'); msg.style.cssText = 'color:#a00;font:11px "DejaVu Sans Mono",monospace;min-height:14px';
     box.appendChild(msg);
     var row = el('div'); row.style.cssText = 'display:flex;justify-content:flex-end;gap:6px';
-    var cancel = btn('sm', S('cancel', 'Cancel')); var save = btn('sm', S('save', 'Save'));
+    var cancel = btn('sm', S('cancel')); var save = btn('sm', S('save'));
     row.appendChild(cancel); row.appendChild(save); box.appendChild(row);
     ov.appendChild(box); document.body.appendChild(ov); nameIn.focus();
     function close() { if (ov.parentNode) ov.parentNode.removeChild(ov); }
     cancel.onclick = close;
-    chooseBtn.onclick = async function () { if (!D.pickObject) { msg.textContent = S('save-no-picker', 'no picker available'); return; } var p = await D.pickObject({ title: S('save-pick', 'Choose a container') }); if (p) { loc = slash(String(p).split('?')[0]); locEl.textContent = loc; } };
+    chooseBtn.onclick = async function () { if (!D.pickObject) { msg.textContent = S('save-no-picker'); return; } var p = await D.pickObject({ title: S('save-pick') }); if (p) { loc = slash(String(p).split('?')[0]); locEl.textContent = loc; } };
     save.onclick = async function () {
       var nm = (nameIn.value || '').trim().replace(/\/+$/, '');
-      if (!nm) { msg.style.color = '#a00'; msg.textContent = S('save-need-name', 'enter a name'); return; }
-      save.disabled = true; msg.style.color = '#333'; msg.textContent = S('saving', 'saving…');
+      if (!nm) { msg.style.color = '#a00'; msg.textContent = S('save-need-name'); return; }
+      save.disabled = true; msg.style.color = '#333'; msg.textContent = S('saving');
       try { var dest = await createSmartFolder(loc, nm, scope); close(); if (D.open) D.open(dest); }
       catch (e) { save.disabled = false; msg.style.color = '#a00'; msg.textContent = (e && e.message) || 'failed'; }
     };
