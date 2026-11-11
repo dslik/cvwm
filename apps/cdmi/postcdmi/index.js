@@ -168,6 +168,13 @@
   // ---- templates
   function serverOrigin() { try { return new URL(uri.value || CTX.baseURI || CTX.origin).origin; } catch (e) { return CTX.origin || ''; } }
   function base() { return (CTX.baseURI || (serverOrigin() + '/cdmi/3.0.0/')); }
+  // Accept a bare path ("/abc/") or any relative reference: it is combined with the default scheme, host and port
+  // taken from the CDMI base, or the desktop origin. An input that already carries a scheme is left exactly as typed.
+  function resolveURI(u) {
+    u = String(u == null ? '' : u).trim();
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) return u;
+    try { return new URL(u, CTX.baseURI || CTX.origin || undefined).href; } catch (e) { return u; }
+  }
   tmpl.addEventListener('change', function () {
     var t = tmpl.value; tmpl.value = ''; if (!t) return;
     var b = base();
@@ -188,7 +195,7 @@
 
   // ---- send
   async function doSend() {
-    var u = uri.value.trim();
+    var u = resolveURI(uri.value); uri.value = u;   // a path like /abc/ becomes a full URL against the default host
     if (!/^https:\/\//i.test(u)) { statusEl.className = ''; statusEl.textContent = S('mustBeHttps'); return; }
     var m = method.value, hdrs = currentHeaders();
     // The desktop's Authorization is added unless the request overrides it, so postcdmi reaches what the desktop can.

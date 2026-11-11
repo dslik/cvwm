@@ -186,8 +186,12 @@ def main():
                     raise UnicodeDecodeError("utf-8", b"", 0, 1, "binary")
                 text = data.decode("utf-8")
                 # Point the desktop at the system fork in its own container: cvwm.js reads data-rsrc off its script tag.
+                # The ?v=<version> query is a cache-buster: the browser keys its cache on the full URL, so a new release
+                # is fetched fresh instead of the desktop running a stale cvwm.js (which then reports the old version and
+                # rejects the freshly stamped apps as "too new"). The server ignores the query and serves the file.
                 if is_desktop and name == "index.html" and 'data-rsrc' not in text:
-                    text = text.replace('<script src="cvwm.js">', '<script src="cvwm.js" data-rsrc="%s">' % sys_fork_url, 1)
+                    ver_q = ('?v=' + built) if built else ''
+                    text = text.replace('<script src="cvwm.js">', '<script src="cvwm.js%s" data-rsrc="%s">' % (ver_q, sys_fork_url), 1)
                 body.update(valuetransferencoding="utf-8", value=text)
             except UnicodeDecodeError:
                 body.update(valuetransferencoding="base64", value=base64.b64encode(data).decode("ascii"))

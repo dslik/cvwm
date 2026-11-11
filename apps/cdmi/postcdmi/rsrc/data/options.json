@@ -6,5 +6,5 @@
   { "name": "data", "alias": "d", "type": "String", "typeLabel": "<body>",
     "description": "Send this string as the request body. Implies POST unless --request is given. Mirrors curl's -d / --data." },
   { "name": "url", "type": "String", "defaultOption": true, "typeLabel": "<uri>",
-    "description": "The request URI, given as the first non-option argument. Must be https." }
+    "description": "The request URI, given as the first non-option argument. An absolute https URL, or a path like /abc/ that is combined with the default scheme, host and port." }
 ]

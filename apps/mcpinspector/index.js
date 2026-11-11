@@ -10,7 +10,9 @@
  * MCP-Protocol-Version header, and it reads a reply framed either way.
  *
  * A token can be pasted, or the app can mint one from the authorization server: with a client id and secret
- * (client_credentials), or as the signed-in desktop user (password grant, using the desktop's own credential). Token
+ * (client_credentials), or in the signed-in person's name by the authorization code flow with PKCE, as a public client
+ * holding no secret — carried in a hidden frame with the credential the desktop already holds, so that nothing is
+ * typed and no window is opened. Token
  * minting reaches the authorization server, which is cross-origin to the desktop, so it works where that server sends
  * CORS headers; otherwise the app says so and the token is pasted instead (the setup prints a curl to mint one).
  *
@@ -462,7 +464,20 @@
     var asBase = String(servers[0]).replace(/\/$/, '');
     var asMeta = await getJson(asBase + '/.well-known/oauth-authorization-server', 'the authorization server metadata');
     if (!asMeta.token_endpoint) throw new Error('The authorization server metadata names no token endpoint.');
-    return { tokenEndpoint: asMeta.token_endpoint, resource: meta.resource || ep, grants: asMeta.grant_types_supported || [], authMethods: asMeta.token_endpoint_auth_methods_supported || [] };
+    return { tokenEndpoint: asMeta.token_endpoint, resource: meta.resource || ep,
+      grants: asMeta.grant_types_supported || [], authMethods: asMeta.token_endpoint_auth_methods_supported || [],
+      authorizationEndpoint: asMeta.authorization_endpoint || '',
+      // Absent is not permissive. "If code_challenge_methods_supported is absent, the authorization server does not
+      // support PKCE and MCP clients MUST refuse to proceed" (MCP authorization, Security Considerations). Held as
+      // undefined rather than [] so that absent and empty are distinguishable from a list that omits S256.
+      challengeMethods: asMeta.code_challenge_methods_supported,
+      // The scopes the RESOURCE says it needs, for least privilege. MCP's scope selection strategy takes the scope
+      // from the 401 WWW-Authenticate challenge first and the protected-resource metadata's scopes_supported second.
+      scopesSupported: meta.scopes_supported,
+      // The issuer, recorded before the user-agent is sent anywhere, for the RFC 9207 check on the way back. The
+      // authenticated source is the metadata document, not the address it was fetched from.
+      issuer: asMeta.issuer,
+      issParameter: asMeta.authorization_response_iss_parameter_supported === true };
   }
   async function getJson(url, what) {
     var res;
@@ -483,13 +498,108 @@
     }
     return new Error('Could not reach ' + what + ' (' + (e && e.message || 'fetch failed') + ').');
   }
+  // ---- The authorization code flow, for a client with no secret ----------------------------------------------------
+  // PKCE (RFC 7636): a fresh verifier per request, and its S256 challenge. This replaces the client secret as the
+  // thing that binds the code to the program redeeming it, which is what lets this page hold no secret at all.
+  // The name of the hidden frame the authorization request is carried in, used both to create it and as the form's
+  // target, so the two cannot drift apart.
+  var AUTHZ_FRAME = 'seedmi-authorize';
+  function b64url(bytes) {
+    var s = ''; for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  async function pkce() {
+    var raw = new Uint8Array(32); crypto.getRandomValues(raw);
+    var verifier = b64url(raw);
+    var digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+    return { verifier: verifier, challenge: b64url(new Uint8Array(digest)) };
+  }
+
+  /**
+   * Carry an authorization request to the controller and wait for the code to come back. Nothing is shown to anyone:
+   * the exchange happens in a hidden iframe, and no window is opened at any point.
+   *
+   * `held` is the credential the desktop already holds, and it is required. The request is submitted as a FORM POST
+   * carrying that name and password, so the person types nothing and sees nothing.
+   *
+   * Why a navigation at all, rather than a fetch. A fetch cannot read the authorization response. With
+   * `redirect: 'manual'` the response is an opaque redirect whose Location a page may not read — exposing the header
+   * does not change that — and with `redirect: 'follow'` the redirect makes the request's origin opaque, so only
+   * `Access-Control-Allow-Origin: *` could satisfy the check, which a server answering with credentials must never
+   * send. Measured in Chromium, both ways. The code therefore has to arrive as a NAVIGATION to this desktop's own
+   * origin, where this page can read it off the frame's URL because it is same-origin by then. A form submission is a
+   * navigation and not a fetch, so no CORS applies to it.
+   *
+   * Why a frame and not a window. Nothing about the flow needs to be visible when the credential is already held, and
+   * a window that appears and vanishes is a pop-up whatever it is for. Measured: the whole exchange completes in a
+   * hidden iframe in well under a second.
+   *
+   * What a frame cannot do, and why that is right. If the credential is not accepted, the controller answers with its
+   * sign-in page, and that page carries `frame-ancestors 'none'` and `X-Frame-Options: DENY` — a sign-in page inside
+   * somebody else's frame is a sign-in page somebody else is reading. The browser refuses to render it, the frame
+   * lands on an error page this page may not read, and the only signal is that nothing arrives. So a stale password
+   * reads as a timeout, and is reported as what it is rather than by opening anything.
+   *
+   * The redirect address need not be a page the desktop serves: the URL is readable the moment the frame lands on this
+   * origin, whatever status it answers with.
+   */
+  function carryAuthorization(endpoint, params, held) {
+    var u = new URL(endpoint);
+    var frame = document.createElement('iframe');
+    frame.name = AUTHZ_FRAME;
+    frame.setAttribute('aria-hidden', 'true');
+    frame.setAttribute('tabindex', '-1');
+    frame.style.cssText = 'position:absolute;left:-9999px;top:auto;width:1px;height:1px;border:0;visibility:hidden';
+    document.body.appendChild(frame);
+
+    var f = document.createElement('form');
+    f.method = 'post'; f.action = u.origin + u.pathname; f.target = AUTHZ_FRAME;
+    var add = function (k, v) {
+      var i = document.createElement('input'); i.type = 'hidden'; i.name = k; i.value = v; f.appendChild(i);
+    };
+    params.forEach(function (v, k) { add(k, v); });
+    add('username', held.name); add('password', held.password);
+    document.body.appendChild(f); f.submit(); f.remove();
+
+    // Poll for the frame to land back on this origin. Reading its location throws while it is still on the controller,
+    // and throws the same way if the browser has put an error page there, which is why a refusal reads as a timeout.
+    return new Promise(function (resolve) {
+      var here = '';
+      try { here = new URL(CTX.baseURI || location.href).origin; } catch (e) { here = location.origin; }
+      var settled = false;
+      var done = function (v) {
+        if (settled) return;
+        settled = true;
+        clearInterval(timer);
+        try { frame.remove(); } catch (e) {}
+        resolve(v);
+      };
+      var timer = setInterval(function () {
+        var at = null;
+        try { at = frame.contentWindow.location.href; } catch (e) { return; }   // still elsewhere, or an error page
+        if (!at || at === 'about:blank' || at.indexOf(here) !== 0) return;
+        var got = new URL(at);
+        done({ code: got.searchParams.get('code'), state: got.searchParams.get('state'),
+          iss: got.searchParams.get('iss'),
+          error: got.searchParams.get('error'), description: got.searchParams.get('error_description') });
+      }, 100);
+      // Generous against a slow controller and still far inside a person's patience: the measured exchange is one
+      // round trip plus a redirect.
+      setTimeout(function () { done({ error: 'timeout' }); }, 15000);
+    });
+  }
+
   async function mintToken(form, label, client) {
     setStatus(S('requestingToken'));
     var disc;
     try { disc = await discoverTokenEndpoint(); }
     catch (e) { setStatus('' + (e.message || e), 'err'); showError(e); return; }
-    form.set('resource', disc.resource);
-    if (!form.has('scope')) form.set('scope', 'cdmi:read cdmi:write cdmi:admin');
+    // An authorization_code request carries what the code was issued against and adds nothing: the scope was settled at
+    // the authorization endpoint, and RFC 6749 4.1.3 does not take one here.
+    if (form.get('grant_type') !== 'authorization_code') {
+      form.set('resource', disc.resource);
+      if (!form.has('scope')) form.set('scope', 'cdmi:read cdmi:write cdmi:admin');
+    }
     // Authenticate the client. A password grant still needs the client to prove who it is -- the resource owner's
     // credentials are not the client's -- so both grants carry the client credentials here. Prefer HTTP Basic
     // (client_secret_basic), the baseline every OAuth server must support and the one this controller advertises;
@@ -498,7 +608,20 @@
     // setup-cvwm.py's secrets.token_urlsafe produces) authenticates reliably rather than by accident.
     var headers = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' };
     var methods = disc.authMethods || [];
-    if (!methods.length || methods.indexOf('client_secret_basic') >= 0) {
+    if (!client) {
+      // A public client. It names itself in the body and holds no secret (RFC 6749 2.1, RFC 8252 8.4: a program
+      // distributed to the people who run it cannot keep one), and the code is bound to this page by the PKCE
+      // verifier instead. The form already carries client_id and code_verifier.
+      // RFC 8414 section 2 makes client_secret_basic the DEFAULT where the metadata omits the field, so an absent
+      // list is a server that wants a secret, not one that will take a client without one. Absent is not permissive.
+      if (methods.indexOf('none') < 0) {
+        setStatus('The authorization server does not accept a client with no secret (' + (methods.length
+          ? 'it names ' + methods.join(', ')
+          : 'its metadata names no authentication method, which RFC 8414 reads as client_secret_basic') +
+          '), so this button cannot be used. Register a public client, or paste a token.', 'err');
+        return;
+      }
+    } else if (!methods.length || methods.indexOf('client_secret_basic') >= 0) {
       headers.Authorization = 'Basic ' + btoa(encodeURIComponent(client.id) + ':' + encodeURIComponent(client.secret));
     } else if (methods.indexOf('client_secret_post') >= 0) {
       form.set('client_id', client.id); form.set('client_secret', client.secret);
@@ -524,26 +647,115 @@
     mintToken(form, 'for client ' + clientId.value.trim(), { id: clientId.value.trim(), secret: clientSecret.value.trim() });
   });
 
-  userBtn.addEventListener('click', function () {
-    // The desktop's own credential, as a Basic header, holds the signed-in user and password; the token is obtained by
-    // the password grant, as that principal. The username is the realm-qualified identifier the desktop resolved.
-    var auth = (CTX.headers && CTX.headers.Authorization) || '';
-    if (!/^Basic /i.test(auth)) { setStatus('Sign in to the desktop with a username and password first (the logged-in credential is not a basic one here).', 'err'); return; }
-    var decoded = ''; try { decoded = atob(auth.replace(/^Basic /i, '')); } catch (e) {}
-    var i = decoded.indexOf(':');
-    if (i < 0) { setStatus('The signed-in credential could not be read.', 'err'); return; }
-    var pass = decoded.slice(i + 1);
-    var username = CTX.principal || decoded.slice(0, i);   // the realm-qualified name the desktop resolved, else the bare one
-    // The password grant still authenticates the client, so the client id/secret are required here too (they are the
-    // client's identity, not the user's) and ride on the Authorization header via mintToken.
-    if (!clientId.value.trim() || !clientSecret.value.trim()) { setStatus(S('enterClient'), 'err'); return; }
+  // The id of the public client this desktop is registered as at the controller. The client id field beside it is the
+  // CONFIDENTIAL client, used by "Get token" for client_credentials; a client with a secret is not a public one, so
+  // the two cannot be the same registration. CTX names it where the desktop was configured with one.
+  var PUBLIC_CLIENT = (CTX.oauth && CTX.oauth.publicClientId) || 'cvwm-mcpinspector';
+  var CALLBACK = (CTX.oauth && CTX.oauth.redirectUri) || (function () {
+    try { return new URL(CTX.baseURI || location.href).origin + '/oauth/callback'; }
+    catch (e) { return location.origin + '/oauth/callback'; }
+  })();
+
+  userBtn.addEventListener('click', async function () {
+    // A token in the signed-in person's name, by the authorization code flow with PKCE (RFC 6749 4.1, RFC 7636). This
+    // page holds no client secret: it is a program distributed to whoever runs the desktop, so a secret in it would be
+    // a secret everyone has. The code is bound to this page by the verifier instead.
+    //
+    // The credential the desktop already holds is submitted with the authorization request, in a hidden frame, so the
+    // person types nothing and sees nothing. No window is opened at any point.
+    //
+    // That credential is required here. Without it there is no way to complete this invisibly: the controller would
+    // answer with its sign-in page, and a sign-in page refuses to be framed (`frame-ancestors 'none'`) precisely so
+    // that it cannot be displayed inside somebody else's document. Showing it would mean a window, and a window that
+    // appears and vanishes is a pop-up whatever it is for. So this button says what it needs instead of opening one.
+    var auth = String((CTX.headers && CTX.headers.Authorization) || '');
+    var held;
+    if (/^Basic /i.test(auth)) {
+      var decoded = ''; try { decoded = atob(auth.replace(/^Basic /i, '')); } catch (e) {}
+      var i = decoded.indexOf(':');
+      if (i > 0) held = { name: CTX.principal || decoded.slice(0, i), password: decoded.slice(i + 1) };
+    }
+    if (!held) {
+      setStatus('This needs the password you signed in to the desktop with, and this session does not hold one — ' +
+        'a Negotiate or certificate sign-in leaves nothing to present. Paste a token into Token instead; the setup ' +
+        'prints a command that mints one.', 'err');
+      return;
+    }
+    setStatus('Asking the authorization server for a code…');
+    var disc, pair;
+    try { disc = await discoverTokenEndpoint(); pair = await pkce(); }
+    catch (e) { setStatus('' + (e.message || e), 'err'); showError(e); return; }
+    if (!disc.authorizationEndpoint) {
+      setStatus('The authorization server metadata names no authorization endpoint, so a code cannot be obtained. ' +
+        'This needs seedmi-dc 1.9 or later; with an earlier controller, paste a token instead.', 'err');
+      return;
+    }
+    // PKCE support is verified before the user-agent goes anywhere, and an absent list is a server that does not
+    // support PKCE rather than one that does not say: MCP requires a client to refuse to proceed in that case. There
+    // is no way to discover PKCE support other than this field, which is why its absence has to be disqualifying.
+    if (!Array.isArray(disc.challengeMethods) || disc.challengeMethods.length === 0) {
+      setStatus('The authorization server metadata does not name code_challenge_methods_supported, so PKCE support ' +
+        'cannot be established and this app will not send an authorization request without it.', 'err');
+      return;
+    }
+    if (disc.challengeMethods.indexOf('S256') < 0) {
+      setStatus('The authorization server does not offer S256 for PKCE (it offers ' + disc.challengeMethods.join(', ') +
+        '), and this app will not fall back to plain.', 'err');
+      return;
+    }
+    // state ties the answer to this request: anything arriving with another one is not an answer to it.
+    var state = b64url(crypto.getRandomValues(new Uint8Array(16)));
+    // Least privilege: ask for what the RESOURCE says it needs, not for everything this app can imagine wanting.
+    // The protected-resource metadata's scopes_supported is the minimal set for basic functionality; asking beyond it
+    // is how a client ends up refused invalid_scope for a permission it never needed.
+    var wanted = Array.isArray(disc.scopesSupported) && disc.scopesSupported.length
+      ? disc.scopesSupported.join(' ') : 'cdmi:read cdmi:write cdmi:admin';
+    var params = new URLSearchParams({ response_type: 'code', client_id: PUBLIC_CLIENT, redirect_uri: CALLBACK,
+      scope: wanted, resource: disc.resource, state: state,
+      code_challenge: pair.challenge, code_challenge_method: 'S256' });
+    var back = await carryAuthorization(disc.authorizationEndpoint, params, held);
+    if (back.error === 'timeout') {
+      // The frame never reached this origin. The ordinary cause is that the controller did not accept the credential
+      // and answered with its sign-in page, which a frame may not render; a page this one cannot read is
+      // indistinguishable from one that has not arrived.
+      setStatus('The authorization server did not accept the password this desktop holds for you, or did not answer. ' +
+        'Sign in to the desktop again, or paste a token into Token.', 'err');
+      return;
+    }
+    if (back.error) {
+      setStatus('The authorization server refused: ' + back.error + (back.description ? ' — ' + back.description : ''), 'err');
+      return;
+    }
+    if (!back.code) { setStatus('The authorization server came back without a code.', 'err'); return; }
+    if (back.state !== state) {
+      setStatus('The answer does not match the request this app made, so it was discarded.', 'err');
+      return;
+    }
+    // RFC 9207 section 2.4: which authorization server answered. An attacker who controls one server a client talks
+    // to can otherwise have the client carry an honest server's code to it, or its own code to the honest one -- a
+    // mix-up attack. The comparison is a simple string comparison with no normalisation: no case folding, no default
+    // port elided, no trailing slash added or removed. An absent iss is only acceptable where the metadata does not
+    // claim to send one.
+    if (back.iss !== null && back.iss !== undefined) {
+      if (back.iss !== disc.issuer) {
+        setStatus('The answer came from ' + back.iss + ', and this app asked ' + disc.issuer +
+          '. It was discarded without being used.', 'err');
+        return;
+      }
+    } else if (disc.issParameter) {
+      setStatus('The authorization server says it identifies itself in its answers and this one did not, ' +
+        'so the answer was discarded.', 'err');
+      return;
+    }
     var form = new URLSearchParams();
-    form.set('grant_type', 'password');
-    form.set('username', username);
-    form.set('password', pass);
-    mintToken(form, 'for ' + username, { id: clientId.value.trim(), secret: clientSecret.value.trim() });
+    form.set('grant_type', 'authorization_code');
+    form.set('code', back.code);
+    form.set('redirect_uri', CALLBACK);
+    form.set('client_id', PUBLIC_CLIENT);
+    form.set('code_verifier', pair.verifier);
+    form.set('resource', disc.resource);
+    mintToken(form, 'for ' + (held ? held.name : 'the signed-in person'), undefined);
   });
-  if (!(CTX.headers && /^Basic /i.test(String((CTX.headers || {}).Authorization || '')))) userBtn.disabled = true, userBtn.title = 'Sign in to the desktop with a username and password to use this.';
 
   connect.addEventListener('click', doConnect);
   [endpoint, token].forEach(function (n) { n.addEventListener('keydown', function (e) { if (e.key === 'Enter') doConnect(); }); });

@@ -51,7 +51,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-SCRIPT_VERSION = "2.142.0"   # setup-cvwm.py (semver)
+SCRIPT_VERSION = "2.145.0"   # setup-cvwm.py (semver)
 HERE_TOOLS = os.path.dirname(os.path.abspath(__file__))   # this script's directory, holding kms-make-dac-keys.mjs
 
 
@@ -702,6 +702,23 @@ class Setup:
                 # scopes therefore refused every request this app makes, even though the MCP endpoint requires
                 # none (scopes_required = false): the refusal is the authorization server's, not the endpoint's.
                 ("scopes", ["cdmi:read", "cdmi:write", "cdmi:admin"]),
+            ])
+            lines.append("")
+            # A SECOND, PUBLIC client for the desktop mcpinspector's "Use logged-in user" button, which now obtains a
+            # token in the signed-in person's name through the authorization code flow with PKCE (seedmi-dc 1.9+). A page
+            # in a browser is handed to whoever runs the desktop, so it cannot keep a secret (RFC 6749 2.1, RFC 8252
+            # 8.4): this registration carries none and the code is bound to the page by its PKCE verifier instead. It has
+            # to be a registration of its own -- a client with a secret is not a public client, so this cannot be the one
+            # "Get token" (client_credentials, above) uses. The controller refuses at startup a secret-less client that
+            # names client_credentials/password/exchange, and requires redirect_uris (https, or http only to the
+            # 127.0.0.1 IP literal). id and redirect match apps/mcpinspector/index.js's defaults (CTX.oauth overrides).
+            lines.append("[[client]]")
+            lines += toml_table([
+                ("id", "cvwm-mcpinspector"),
+                ("grants", ["authorization_code"]),
+                ("audiences", ["https://%s:%d/mcp" % (self.host, self.mcp_port)]),
+                ("scopes", ["cdmi:read", "cdmi:write", "cdmi:admin"]),
+                ("redirect_uris", ["https://%s:%d/oauth/callback" % (self.host, self.https_port)]),
             ])
             lines.append("")
         self._write(path, lines)

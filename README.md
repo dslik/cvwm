@@ -2,8 +2,6 @@
 
 The CDMI Virtual Window Manager: an X11/FVWM-style desktop for CDMI 3 servers, in plain JavaScript, with a suite of applications for browsing and managing a server.
 
-<img width="2560" height="1600" alt="desktop" src="https://github.com/user-attachments/assets/dfbd723b-fc84-41b3-940b-a2742fba59ab" />
-
 ```
 cvwm.js               the desktop: window manager, CDMI client, container browser
 index.html            a handful of lines that load cvwm.js
@@ -20,18 +18,21 @@ tools/
   cdmi-scp            an scp workalike where a remote is a CDMI namespace (over HTTPS)
   kms-make-dac-keys.mjs  create seedmi's delegated-access-control keys (used by setup-cvwm.py --with-dac)
 rsrc/                 the shared resource fork installed into the desktop container
-apps/                 the GUI applications, each a container holding index.js (and index.png) on the server
+apps/                 the GUI applications, each a container holding index.js (and an icon, index.svg or index.png) on the server
   earthworm/          a location bar around an iframe (a minimal web browser)
   textile/            a text editor; JSON and JavaScript are coloured; follows the desktop's light/dark theme
   xclock/             an analogue clock, after the X11 one
   mcpinspector/       a native MCP client for the CDMI-over-MCP endpoint
   mdviewer/           opens a Markdown object (or one dropped on it) and renders it, GitHub style
-  pdfviewer/          opens a PDF with the browser's own PDF renderer
+  fontviewer/         opens a font (TTF/OTF/WOFF/WOFF2): a sample and a Unicode character viewer
   utils/              console/  xterm/  capture/  framer/
   cdmi/               capabilities/  domains/  namespaces/  postcdmi/  queues/
                       relationships/  servers/  notifications/  query/
 bin/                  the xterm's commands, each a container under /bin/:
-                      ls pwd cat head hexdump stat caps tree df echo open which nc ssh
+                      ls pwd cat head hexdump stat caps tree df echo open which nc ssh zip unzip
+control_panels/       control panels, imported into each home like apps and configured under ~/proc/:
+                      locale/   language, number, date and time formats
+fonts/                a server-wide fonts container, imported into each home like apps; double-click a font to view it
 ```
 
 
@@ -113,6 +114,19 @@ and `index.png` beside it is its icon. The desktop hands the script `window.CDMI
 The members above are the whole contract between the desktop and an application. Applications run same-origin with
 the desktop, so they act with the user's full access to the server.
 
+## Run as another user
+
+An application's context menu has **Run as…** below **Run**: it signs in as another user (without disturbing your
+own session) and launches that application as them. Its window carries that principal's `Authorization`, and an
+Open/Save dialog the application raises inherits it too, so the application acts entirely as the other user. Each
+window's title bar shows `user@domain` on the right; a window running as a principal with administrator privileges
+shows a red/orange hazard bar.
+
+Because every window runs same-origin, this is a **convenience, not an isolation boundary** — one window's
+credential is as reachable to other code in the desktop as any application's already is (an application is handed
+the user's `Authorization` and runs with their full access). Run-as windows are never serialized or migrated to
+another screen, and their credential is dropped when the window closes.
+
 ## Scroll bars
 
 The operating system's scroll bars are replaced, in the desktop and inside every application window, by Motif-style
@@ -128,6 +142,52 @@ The root menu (left-click the desktop background) has a **Dark mode** toggle. It
 desktop: it re-themes the window manager and its windows, and every application that follows it does so at the same
 time, in each of their windows. The choice is remembered. Applications that ship with the desktop and follow it
 include Textile and the Open/Save dialog.
+
+## Control panels
+
+Control panels are small settings applications. The server holds them under `/control_panels/`, and each home imports
+them into `~/control_panels/` exactly as it imports the server's apps into `~/apps/` — a writable layer of the user's
+own over a read-only import of the server's — so they appear in the home disk and open with a double-click. A panel
+keeps its preferences as JSON in the home, under `~/prefs/`.
+
+The **Locale** panel sets the preferred language and the number, date and time (12- or 24-hour) formats. There are no
+buttons: a change applies at once. It writes a shared signal (the same mechanism as the dark-mode toggle), so the
+desktop and every open application re-render in the new formats immediately — the file browser's *Last modified* column
+and sizes, for one — and it saves the choice to `~/prefs/locale.json` so it returns on the next sign-in.
+Applications receive the locale in their context and can follow the same live signal.
+
+The **Apps** panel manages which application opens which kind of object, and the icon each kind shows. An application
+declares the file types it handles — media types and extensions, each with an icon — in its own resource fork, in
+`rsrc/filetypes.json`; the panel reads those declarations and lists, in one column, every added app (expand one to see
+its types) and, in the other, every known file type and the app that opens it. Add or remove apps there. The registry
+is `~/prefs/apps.json`, seeded on first sign-in from the built-in apps; the desktop reads it to route a double-click to
+the right app and to pick an object's icon. A type no app claims does not auto-open.
+
+## Fonts
+
+The server holds a `/fonts/` container, and each home imports it into `~/fonts/` the same way it imports apps and
+control panels — a writable layer of the user's own over a read-only import of the server's. An administrator drops
+font files into `/fonts/`, or a user drops their own into `~/fonts/`.
+
+Double-clicking a font object (`.ttf`, `.otf`, `.woff`, `.woff2`) opens **fontviewer**, the app the registry links to
+those types. It loads the font with the browser's `FontFace` API and shows, in one fixed-height window, a **sample** — a
+large multi-line text box you can type into, rendered in the font at a size you set — and a **Unicode character
+viewer**: the font's own repertoire, grouped by Unicode block, with the selected glyph's code point. The family,
+style, glyph count and format come from the font's own tables (`name`, `maxp`, `cmap`), parsed for TrueType/OpenType
+and WOFF; a WOFF2 font still renders, and its repertoire is found by probing. Launched on its own (rather than on a
+font), fontviewer stays hidden and raises the standard Open dialog, filtered to fonts; it appears once you choose one.
+The release ships `/fonts/` empty.
+
+## Screens
+
+Each browser window signed in to a home registers itself as a container under `~/proc/screens/`, numbered `1`, `2`,
+`3`, … like X11 screens — the number is what the window menu's **Send to desk** shows (`Screen 2: Desk 3`). The
+number is only a label; the window's durable identity is a UUID kept in the tab's `sessionStorage` and written into
+the container's metadata, alongside a per-browser install id. A reload or crash-restore re-adopts the same container;
+signing out or closing the window removes it; and a browser cleans up its own crashed windows at the next sign-in, by
+asking which of its windows are still alive over a `BroadcastChannel` and deleting the rest. There is no heartbeat and
+no expiry, so a screen left by another browser or device — which can't be told apart from a live one — is left in
+place.
 
 ## Icon view and list view
 
@@ -190,6 +250,24 @@ a replacement confirmed, because a server may not honour `If-None-Match` on a co
 a root, `cdmi_snapshots`) cannot be picked up, nothing can be dropped into itself, and a copy dropped where it
 already is becomes "name copy.ext".
 
+## Download, zip and unzip
+
+A data object's context menu in a container window has **Download…**, which saves the object's value to the
+browser's downloads as a file of its own name and media type. It is a plain download (not an OS drag), so it works in
+every browser, and it reads the value with the signed-in user's credentials.
+
+To download something compressed, or to bundle several objects, the xterm has `zip` and `unzip`. They read and write
+CDMI objects and produce standard PKZIP archives (DEFLATE through the browser's `CompressionStream`, or stored with
+`-0`), so an archive made here opens with any unzip tool and vice versa:
+
+```
+zip [-0] [-r] archive.zip path...      pack data objects (and, with -r, containers) into a new archive.zip object
+unzip [-l] [-d dir] archive.zip [name...]   list, or extract entries into the current container (or -d dir)
+```
+
+So `zip -r site.zip www` then Download… on `site.zip` gets a compressed copy onto your machine; `unzip backup.zip`
+unpacks an archive dropped or created in the store.
+
 ## Textile
 
 A text editor with a File/Edit/View menu bar and a status bar: line numbers, Find (Ctrl+F), Go to Line (Ctrl+G),
@@ -207,7 +285,7 @@ The xterm is a terminal (VT100-family: cursor addressing, attributes and colours
 and a shell; `nc host port` is a TCP connection through a WebSocket-to-TCP relay in the server, joined to the
 terminal. `cd`, `help`, `history`, `clear`, `exit` and `rehash` are built in; any other name is looked for
 as `/bin/<name>/` (a text command, run in a hidden frame and writing to the terminal) or `/apps/<name>/` (a GUI
-application, started in a window), on the current disk first and then the others. `pdfviewer report.pdf` starts pdfviewer on
+application, started in a window), on the current disk first and then the others. `textile notes.txt` starts textile on
 that object; `xclock &` starts the clock and gives the prompt straight back. Commands take `--help`. Writing a new
 command is a matter of creating `/bin/<name>/index.js`.
 
@@ -223,8 +301,3 @@ frame, and anything inside a frame of another origin. A failed request is listed
 own console has the exact one. Wrapping `console` also means the browser's console attributes those lines to
 `cvwm.js` rather than to the caller.
 
-## pdfviewer
-
-Opens a PDF kept in CDMI (or one dropped onto the window) and shows it with the browser's own PDF
-renderer in an iframe. Opening any `.pdf` object, or any object of type `application/pdf`, from the desktop
-starts it. Needs a desktop browser with a built-in PDF viewer.

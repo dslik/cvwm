@@ -205,7 +205,7 @@ def ensure_container(http, url, created):
     created.add(url)
 
 
-def update_folder(http, base, rel, folder, only, prune, created, counts, rsrc_url=None):
+def update_folder(http, base, rel, folder, only, prune, created, counts, rsrc_url=None, built=None):
     """Bring one deployed container in line with a local folder: write changed/new files, optionally prune the rest.
     `rsrc_url`, for the desktop container, is written onto index.html's script tag as data-rsrc so the desktop finds
     the system fork in its own container."""
@@ -219,7 +219,11 @@ def update_folder(http, base, rel, folder, only, prune, created, counts, rsrc_ur
     for name, path in sorted(local.items()):
         mime, enc, value, size = read_file(path)
         if rsrc_url and name == "index.html" and enc == "utf-8" and "data-rsrc" not in value:
-            value = value.replace('<script src="cvwm.js">', '<script src="cvwm.js" data-rsrc="%s">' % rsrc_url, 1)
+            # ?v=<version> cache-buster: the browser keys its cache on the full URL, so a new release is fetched fresh
+            # rather than the desktop running a stale cvwm.js that reports the old version and rejects the freshly
+            # stamped apps as "too new". The server ignores the query and serves the file.
+            ver_q = ('?v=' + built) if built else ''
+            value = value.replace('<script src="cvwm.js">', '<script src="cvwm.js%s" data-rsrc="%s">' % (ver_q, rsrc_url), 1)
             size = len(value.encode("utf-8"))
         url = container + urllib.parse.quote(name)
         cur = deployed_value(http, url)
@@ -324,7 +328,7 @@ def main():
         print("%s/" % rel)
         is_desktop = bool(args.desktop) and rel == args.desktop.strip("/")
         rsrc_url = base + rel + "/rsrc/" if is_desktop else None   # the system fork lives in the desktop container
-        update_folder(http, base, rel, folder, only, args.prune, created, counts, rsrc_url)
+        update_folder(http, base, rel, folder, only, args.prune, created, counts, rsrc_url, built)
         # The shared system fork is serialized from rsrc/ and updated into the desktop container with one deserialize.
         if is_desktop:
             sys_src = os.path.join(PKG, "rsrc")
