@@ -1,6 +1,6 @@
 /*!
  * cvwm - the CDMI Virtual Window Manager: an X11 / FVWM style desktop for CDMI 3 servers, in one plain JavaScript file.
- * cvwm version: 2.145.0
+ * cvwm version: 2.150.0
  *
  *   <!doctype html><meta charset="utf-8"><title>cvwm</title><script src="cvwm.js"></script>
  *
@@ -45,6 +45,7 @@
     appEntry: 'index.js',
     appIcon: 'index.png',
     appIcons: ['index.svg', 'index.png'],   // an application/control-panel icon, SVG preferred over PNG
+    docMarker: 'creator.json',   // a container holding this (and no index.js) is a DOCUMENT: it names the uuid of the app that opens it (docs/container-documents.md)
     appsDir: 'apps/',
     panelsDir: 'control_panels/',   // control panels: imported into the home like apps (see provisionHomePanels)
     fontsDir: 'fonts/',             // fonts: a server-wide /fonts/ imported into the home like apps (see provisionHomeFonts)
@@ -75,7 +76,7 @@
   /* A value is returned only where a read selects it, so reading an object's value names these fields. */
   var VALUE_FIELDS = '?objectType&objectName&objectID&mimetype&metadata&valuetransferencoding&valuerange&value';
   var MOUNTS_KEY = 'cvwm.mounts', VIEW_KEY = 'cvwm.view';
-  var VERSION = '2.145.0';                 // the running build; a change purges cvwm's saved state (see below)
+  var VERSION = '2.150.0';                 // the running build; a change purges cvwm's saved state (see below)
   var VERSION_KEY = 'cvwm.version';
   // The oldest cvwm version an application may declare (in rsrc/manifest.json "builtAgainst") and still run here. An
   // app built against an older cvwm, or one that declares nothing at all, is refused with "a newer version of the
@@ -2362,9 +2363,9 @@
         var kids = [h('i', { html: icon(iconName, 16) }), h('span', { class: 'nm', text: label })];
         if (target && target.versioned) kids.push(h('span', { class: 'ver', text: 'v', title: 'Has earlier versions \u2014 Versions\u2026 to browse them' }));
         var b = h('button', { type: 'button', class: dim ? 'dim' : null }, kids);
-        b.addEventListener('click', function () { selectRow(b, target); });
-        b.addEventListener('dblclick', function () { if (target && target.open) target.open(); });
-        b.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); if (target && target.open) target.open(); } });
+        b.addEventListener('click', function () { if (target && target.inert) return; selectRow(b, target); });   // an inert row (a type this app did not register) cannot be selected
+        b.addEventListener('dblclick', function () { if (target && !target.inert && target.open) target.open(); });
+        b.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); if (target && !target.inert && target.open) target.open(); } });
         rows.appendChild(b); return b;
       }
       async function browse(loc) {
@@ -2386,21 +2387,52 @@
         rows.textContent = '';
         makeRow('container', '..', false, { type: 'up', open: function () { browse(loc.segs.length ? { base: loc.base, name: loc.name, segs: loc.segs.slice(0, -1) } : null); } });
         var kids = listed.children || [];
+        // Filtered mode: an app opening a document sees only the types it registered. Folders stay browsable but are not
+        // themselves a result; a container-document is selectable when this app can open it. Off (the default, and every
+        // Save dialog) keeps the original behaviour: all objects selectable, containers pickable.
+        var filtered = !save && !!opts._typeMatch, probes = 0;
+        function docPickable(doc) {
+          if (!doc) return false;
+          if (opts._selfUuid && doc.app && String(doc.app).toLowerCase() === opts._selfUuid) return true;   // an app always opens its own documents
+          if (!doc.type) return true;                                                                        // a document that names no type may be opened by anyone
+          return opts._typeMatch('', doc.type);                                                              // else this app must have registered its type
+        }
         kids.filter(function (c) { return c.kind === 'container' && !/^cdmi_/.test(c.name); }).forEach(function (c) {
-          var bare = c.name.replace(/\/$/, '');
-          makeRow('container', c.name, false, { type: 'dir',
-            open: function () { browse({ base: loc.base, name: loc.name, segs: loc.segs.concat(bare) }); },   // double-click browses in
-            pick: function () { finish(dirURL(loc) + enc(bare) + '/'); } });                                 // Open returns the container
+          var bare = c.name.replace(/\/$/, ''), curl = dirURL(loc) + enc(bare) + '/';
+          if (!filtered) {
+            makeRow('container', c.name, false, { type: 'dir',
+              open: function () { browse({ base: loc.base, name: loc.name, segs: loc.segs.concat(bare) }); },   // double-click browses in
+              pick: function () { finish(curl); } });                                                          // Open returns the container
+            return;
+          }
+          var target = { type: 'dir', open: function () { browse({ base: loc.base, name: loc.name, segs: loc.segs.concat(bare) }); } };   // a folder navigates; it is not a result
+          var b = makeRow('container', c.name, false, target);
+          function decide(doc) {
+            if (!doc) return;                                                                                 // a plain folder: stays navigable
+            if (docPickable(doc)) { target.open = function () { finish(curl); }; target.pick = function () { finish(curl); }; }   // a container-document this app opens: selecting/opening returns it, not its contents
+            else { target.inert = true; b.classList.add('dim'); if (selEl === b) clearSel(); }                // a document this app cannot open
+          }
+          var looksDoc = c.inside ? (c.inside.indexOf(CFG.appEntry) < 0 && c.inside.indexOf(CFG.docMarker) >= 0) : null;
+          if (looksDoc === false) return;                                                                     // the listing says a plain folder/app: navigable, no probe
+          if (looksDoc === true || (looksDoc === null && probes < CFG.probeLimit)) { probes++; probeDocContainer(curl, principalAuth).then(decide, function () {}); }
         });
         var files = kids.filter(function (c) { return c.kind === 'object'; });
         files.forEach(function (c) { existing[c.name] = 1; });   // names Save warns about before overwriting
-        var pass = opts.filter ? files.filter(function (c) { return opts.filter(c.name, c.kind); }) : files;
-        var offer = opts.filter ? pass.concat(files.filter(function (c) { return !opts.filter(c.name, c.kind); })) : files;
-        offer.forEach(function (c) {
-          var dim = opts.filter ? !opts.filter(c.name, c.kind) : false, url = dirURL(loc) + enc(c.name.replace(/[\/?]$/, ''));
-          makeRow('object', c.name, dim, { type: 'file', name: c.name, url: url, versioned: !!c.versioned,
-            open: function () { if (save) { nameIn.value = c.name; nameIn.focus(); } else finish(url); } });
-        });
+        if (!filtered) {
+          var pass = opts.filter ? files.filter(function (c) { return opts.filter(c.name, c.kind); }) : files;
+          var offer = opts.filter ? pass.concat(files.filter(function (c) { return !opts.filter(c.name, c.kind); })) : files;
+          offer.forEach(function (c) {
+            var dim = opts.filter ? !opts.filter(c.name, c.kind) : false, url = dirURL(loc) + enc(c.name.replace(/[\/?]$/, ''));
+            makeRow('object', c.name, dim, { type: 'file', name: c.name, url: url, versioned: !!c.versioned,
+              open: function () { if (save) { nameIn.value = c.name; nameIn.focus(); } else finish(url); } });
+          });
+        } else {
+          files.forEach(function (c) {
+            var url = dirURL(loc) + enc(c.name.replace(/[\/?]$/, '')), ok = opts._typeMatch(c.name, c.mime);
+            if (ok) makeRow('object', c.name, false, { type: 'file', name: c.name, url: url, versioned: !!c.versioned, open: function () { finish(url); } });
+            else makeRow('object', c.name, true, { type: 'file', name: c.name, url: url, inert: true });   // a type this app did not register: shown, not selectable
+          });
+        }
         if (rows.childNodes.length <= 1) rows.appendChild(h('p', { class: 'empty', text: 'Nothing else here.' }));
       }
       // Read a version-enabled object's versions (newest first). Each version is a separate object addressed by its
@@ -3922,10 +3954,40 @@
   /* ------------------------------------------------------------------ applications (index.js in an iframe) */
 
   var appCache = {};        // container URL -> boolean
+  var docCache = {};        // container URL -> { app, version, type } | null  (a container-document's creator.json, parsed)
   var apps = {};            // id -> Win
   function probeApp(url) {
     if (url in appCache) return Promise.resolve(appCache[url]);
     return req(url + enc(CFG.appEntry) + '?objectName', T_OBJECT, { quiet: true }).then(function (r) { return (appCache[url] = r.ok); }, function () { return false; });
+  }
+  // A container-document declares, in its creator.json, the uuid of the application that created and opens it (and,
+  // optionally, its media `type` and the creating `version`). probeDocContainer reads and caches that -- one small GET
+  // per container, only where the listing did not already reveal creator.json (see the browser's c.inside path).
+  function probeDocContainer(url, auth) {
+    if (url in docCache) return Promise.resolve(docCache[url]);
+    return getRep(url + enc(CFG.docMarker) + '?value', T_OBJECT, { quiet: true, auth: auth || undefined }).then(function (g) {
+      var info = null;
+      try {
+        var raw = g.rep.value, o = (raw && typeof raw === 'object') ? raw : JSON.parse(g.rep.valuetransferencoding === 'base64' ? b64text(raw) : raw);
+        if (o && typeof o === 'object' && o.app) info = { app: String(o.app), version: o.version || null, type: o.type || null };
+      } catch (e) { info = null; }
+      return (docCache[url] = info);
+    }, function () { return (docCache[url] = null); });
+  }
+  // Resolve the application that opens a container-document, by the uuid its creator.json names (registry collision
+  // rule). Null when no installed app has that uuid.
+  async function resolveAppByUuid(uuid) {
+    if (!uuid) return null;
+    await registryReady();
+    var rec = pickApp(APPREG.byUuid[String(uuid).toLowerCase()] || []);
+    return rec ? rec.uri : null;
+  }
+  // Open a container-document: launch its creator app with the container as the document. If that app is not installed,
+  // fall back to browsing the container's contents, so the document is never simply unopenable.
+  async function openDocContainer(url, doc, into) {
+    var appURI = await resolveAppByUuid(doc && doc.app);
+    if (appURI) return launchApp(appURI, { start: url });
+    return openContainer(url, { into: into, browse: true });
   }
 
   // Whether a container object itself DEFINES exports and/or imports: the object's own "exports" and "imports"
@@ -4005,7 +4067,7 @@
   // extended listing of rsrc/ plus one per per-object category, and finally to per-object reads. Values decode by
   // mimetype / valuetransferencoding; a resource's own metadata is not loaded.
   var RSRC_FIELDS = ['objectName', 'objectType', 'value', 'valuetransferencoding', 'mimetype'];
-  var rsrcCache = {};       // fork URL -> Promise({ <category>: { kind:'collection', data } | { kind:'object', items } })
+  var rsrcCache = {};       // fork URL -> { fp: <probe fingerprint>, data: { <category>: … }, pending?: Promise } (revalidated per launch)
   function forkVal(tuple, at) { return { value: tuple[at.value], enc: (at.valuetransferencoding !== undefined && tuple[at.valuetransferencoding]) || 'utf-8', mimetype: (at.mimetype !== undefined && tuple[at.mimetype]) || '' }; }
   function forkCollection(v) { try { return typeof v === 'string' ? JSON.parse(v) : (v && typeof v === 'object' ? v : {}); } catch (e) { return {}; } }
   function forkAt(fields) { var at = {}; fields.forEach(function (f, i) { at[f] = i; }); return at; }
@@ -4034,22 +4096,70 @@
     });
     return out;
   }
+  // The values fast path (seedmi >= 0.116): one combined recursive + extended listing, parsed into the fork map; falls
+  // back to the per-listing / per-object slow path where the combination is refused. This is the request that actually
+  // reads the fork's contents (icons, strings, data), so it runs only on a cold load or when the fork has changed.
+  async function loadRsrcForkValues(forkURL) {
+    var at = forkAt(RSRC_FIELDS);
+    var res = await req(forkURL + '?childrecursive&childfields=' + RSRC_FIELDS.join(';') + '&children=0-9999', ACCEPT_DIR, { quiet: true, probe: true });
+    if (res.ok) {
+      var kids = (await res.json()).children || [];
+      if (!kids.length) return {};
+      if (Array.isArray(kids[0])) return forkFromRecursive(kids, at);     // extended tuples: parse the nested tree
+      // plain names (childfields ignored): fall through to the per-listing path
+    } else if (res.status === 404) { return {}; }
+    else if (res.status !== 400 && res.status !== 409) { throw await toError(res); }
+    return await loadRsrcForkSlow(forkURL, at);
+  }
+  // The revalidation probe: a recursive listing of names + metadata only (no values), a few KB even for a large fork.
+  // Its fingerprint — every object's path, mtime, size and mcount — changes whenever any resource is added, removed or
+  // replaced, which is the signal the desktop uses to notice an app updated in place (seedmi serves no ETag on a
+  // container listing, so HTTP revalidation alone cannot catch this). A server that ignores childfields (returns plain
+  // names, or refuses the recursive combination) yields a null fingerprint, and the fork then stays cached for the page
+  // as before. See docs/app-compatibility.md and the rsrc-cache proposal.
+  var PROBE_FIELDS = ['objectName', 'objectType', 'metadata'];
+  function forkFingerprint(kids, at) {
+    var parts = [];
+    (function walk(list, prefix) {
+      list.forEach(function (t) {
+        if (!Array.isArray(t)) return;
+        var name = prefix + (t[at.objectName] || '');
+        var md = (t[at.metadata] && typeof t[at.metadata] === 'object') ? t[at.metadata] : {};
+        parts.push(name + '|' + (md.cdmi_mtime || '') + '|' + (md.cdmi_size || '') + '|' + (md.cdmi_mcount || ''));
+        for (var i = PROBE_FIELDS.length; i < t.length; i++) if (Array.isArray(t[i])) walk(t[i], name);   // nested children
+      });
+    })(kids || [], '');
+    return parts.sort().join('\n');
+  }
+  // Load an app's resource fork, revalidating a cached copy against the server on every call. A cached entry is kept
+  // only while its probe fingerprint is unchanged; a changed fork (an app updated in place) is re-read on its next
+  // launch, with no page reload. Concurrent launches of the same fork share one in-flight load.
   function loadRsrcFork(forkURL) {
     forkURL = stripQuery(String(forkURL || '')); if (!/\/$/.test(forkURL)) forkURL += '/';
-    if (forkURL in rsrcCache) return rsrcCache[forkURL];
-    return (rsrcCache[forkURL] = (async function () {
-      var at = forkAt(RSRC_FIELDS);
-      // Fast path: one combined recursive + extended listing.
-      var res = await req(forkURL + '?childrecursive&childfields=' + RSRC_FIELDS.join(';') + '&children=0-9999', ACCEPT_DIR, { quiet: true, probe: true });
-      if (res.ok) {
-        var kids = (await res.json()).children || [];
-        if (!kids.length) return {};
-        if (Array.isArray(kids[0])) return forkFromRecursive(kids, at);   // extended tuples: parse the nested tree
-        // plain names (childfields ignored): fall through to the per-listing path
-      } else if (res.status === 404) { return {}; }
-      else if (res.status !== 400 && res.status !== 409) { throw await toError(res); }
-      return await loadRsrcForkSlow(forkURL, at);
-    })().catch(function (e) { delete rsrcCache[forkURL]; throw e; }));
+    var hit = rsrcCache[forkURL];
+    if (hit && hit.pending) return hit.pending;                          // a load/revalidation is already under way
+    var p = (async function () {
+      var probe = await req(forkURL + '?childrecursive&childfields=' + PROBE_FIELDS.join(';') + '&children=0-9999', ACCEPT_DIR, { quiet: true, probe: true });
+      if (probe.status === 404) { rsrcCache[forkURL] = { fp: '', data: {} }; return {}; }
+      var pk = probe.ok ? ((await probe.json()).children || []) : null;
+      if (!probe.ok && probe.status !== 400 && probe.status !== 409) throw await toError(probe);
+      var fp = (pk && pk.length && Array.isArray(pk[0])) ? forkFingerprint(pk, forkAt(PROBE_FIELDS)) : null;
+      if (hit && fp === hit.fp) return hit.data;                          // unchanged (or an old server: both null) -> serve cache
+      var data = (fp !== null) ? await loadRsrcForkValues(forkURL) : await loadRsrcForkSlow(forkURL, forkAt(RSRC_FIELDS));
+      rsrcCache[forkURL] = { fp: fp, data: data };
+      return data;
+    })();
+    rsrcCache[forkURL] = { fp: hit ? hit.fp : null, data: hit ? hit.data : null, pending: p };
+    p.then(function () { var e = rsrcCache[forkURL]; if (e && e.pending === p) delete e.pending; },
+           function () { if (hit) rsrcCache[forkURL] = hit; else delete rsrcCache[forkURL]; });   // on failure keep the prior good copy, or drop a failed cold load
+    return p;
+  }
+  // Drop a fork's cached copy and load it fresh. For installers, panels and tests that know a fork just changed and do
+  // not want to wait for the next probe to notice. Revalidation (loadRsrcFork) makes this a convenience, not a necessity.
+  function reloadRsrcFork(forkURL) {
+    forkURL = stripQuery(String(forkURL || '')); if (!/\/$/.test(forkURL)) forkURL += '/';
+    delete rsrcCache[forkURL];
+    return loadRsrcFork(forkURL);
   }
   // The pre-0.116 path: one extended listing of rsrc/ (value per collection, type per child) plus one extended listing
   // per per-object category, with a per-object read where a listing does not carry the value.
@@ -4113,13 +4223,20 @@
     }
     return 0;
   }
-  // The compatibility gate. An app declares, in rsrc/manifest.json, the cvwm version it was built against; the
-  // packaging tools stamp it (see docs/app-compatibility.md). Return null when the app may run, or the message to show
-  // instead. An app that declares nothing is treated as too old on purpose: it predates this contract.
-  function appCompat(builtAgainst) {
-    if (!builtAgainst) return 'This application does not say which version of cvwm it was built for, so it cannot run on this version (' + VERSION + '). A newer version of the application is needed.';
-    if (cmpVer(builtAgainst, MIN_APP_VERSION) < 0) return 'This application was built for cvwm ' + builtAgainst + ', which this version (' + VERSION + ') no longer supports. A newer version of the application is needed.';
-    if (cmpVer(builtAgainst, VERSION) > 0) return 'This application was built for cvwm ' + builtAgainst + ', which is newer than this version (' + VERSION + '). A newer version of cvwm is needed to run it.';
+  // The compatibility gate. An app's rsrc/manifest.json declares "builtAgainst" -- the cvwm version it was built and
+  // tested against, its contract -- and, optionally, "lowestSupported" -- the oldest cvwm it still runs on, which may
+  // be older than what it was built against. The packaging tools stamp builtAgainst; the author may add
+  // lowestSupported (see docs/app-compatibility.md). Two independent checks against two reference points: builtAgainst
+  // vs this build's app-contract floor (MIN_APP_VERSION) rules out an app whose contract is too old to honour;
+  // lowestSupported vs the running VERSION rules out a cvwm too old for the app. A '*' component in either is a
+  // wildcard (cmpVer). Return null when the app may run, else the message to show. Declaring nothing is too old on
+  // purpose: it predates this contract.
+  function appCompat(mani) {
+    var built = (mani && typeof mani.builtAgainst === 'string') ? mani.builtAgainst : null;
+    var lowest = (mani && typeof mani.lowestSupported === 'string') ? mani.lowestSupported : built;   // default: as conservative as builtAgainst
+    if (!built) return 'This application does not say which version of cvwm it was built for, so it cannot run on this version (' + VERSION + '). A newer version of the application is needed.';
+    if (cmpVer(built, MIN_APP_VERSION) < 0) return 'This application was built for cvwm ' + built + ', which this version (' + VERSION + ') no longer supports. A newer version of the application is needed.';
+    if (lowest && cmpVer(lowest, VERSION) > 0) return 'This application needs cvwm ' + lowest + ' or newer, and this is ' + VERSION + '. A newer version of cvwm is needed to run it.';
     return null;
   }
 
@@ -4134,9 +4251,8 @@
       // Compatibility gate (appCompat): the app's rsrc/manifest.json declares the cvwm it was built against. Refuse an
       // app this build cannot run -- and refuse one that declares nothing -- before fetching or running its code.
       var mani = (forkMap['manifest.json'] && forkMap['manifest.json'].data) || null;
-      var builtAgainst = (mani && typeof mani.builtAgainst === 'string') ? mani.builtAgainst : null;
-      var incompat = appCompat(builtAgainst);
-      if (incompat) { messageBox('Cannot run ' + label, incompat); return; }
+      var incompat = appCompat(mani);
+      if (incompat) { if (extra && extra.quiet) throw new Error(incompat); messageBox('Cannot run ' + label, incompat); return; }
 
       var got = await readObject(containerURL + enc(CFG.appEntry)), val = await readValue(got);
       var source = val.text !== undefined ? val.text : bytesToText(val.bytes);
@@ -4206,7 +4322,7 @@
       });
       frame.srcdoc = doc;
       return w;
-    } catch (e) { messageBox('Cannot run ' + label, e.message); }
+    } catch (e) { if (extra && extra.quiet) throw e; messageBox('Cannot run ' + label, e.message); }
   }
 
   /* ------------------------------------------------------------------ object viewers */
@@ -4268,6 +4384,7 @@
     var d = diskFor(url);
     if (!o.browse && d && url === d.base + 'cdmi_objectid/') return objectIdDialog(d, o.into);
     if (!o.browse && await probeApp(url)) return launchApp(url);
+    if (!o.browse) { var doc = await probeDocContainer(url); if (doc) return openDocContainer(url, doc, o.into); }   // a container-document opens in its creator app, not as a folder
     var b = o.into || new Browser();
     b.show(url);
     return b;
@@ -4451,7 +4568,9 @@
      on first sign-in it is seeded from the built-in apps. A type claimed by more than one app resolves to the first in
      the list (links may override). The icon an object shows is the claiming app's declared icon for that type: a name
      of a built-in cvwm icon, a resource path within the app, or -- absent -- the app's own index.svg/png. */
-  var APPREG = { ready: false, byExt: {}, byMime: {}, wild: [], apps: [] };
+  var APPREG = { ready: false, byExt: {}, byMime: {}, wild: [], apps: [], byName: {}, byUuid: {}, byShort: {} };
+  var appRegResolve, appRegReady = new Promise(function (r) { appRegResolve = r; });
+  function registryReady() { return APPREG.ready ? Promise.resolve() : appRegReady; }   // so the app-resolution API never answers null merely because the registry is still loading
   function b64text(s) { try { return decodeURIComponent(escape(atob(String(s).replace(/\s+/g, '')))); } catch (e) { try { return atob(s); } catch (_) { return ''; } } }
   function appURIof(homeBase, rel) { return /^https?:/i.test(rel) ? rel : homeBase + String(rel).replace(/^\//, ''); }
   function iconSpecFor(appURI, icon) { if (!icon) return { app: appURI }; if (ICONS[icon]) return { builtin: icon }; return { app: appURI, path: String(icon) }; }
@@ -4465,6 +4584,74 @@
       var m = JSON.parse(raw); return Array.isArray(m.types) ? m.types : [];
     } catch (e) { return null; }     // null: not an app that declares types (or unreadable)
   }
+  // The app's rsrc/manifest.json: its identity (name "net.cvwm.vwrite", uuid, version, versionUuid) and the gate
+  // versions (builtAgainst, lowestSupported). Absent or partial => the fields it omits are null and it resolves by its
+  // folder name only.
+  async function readManifest(appURI) {
+    try {
+      var got = await getRep(appURI + 'rsrc/manifest.json?value', T_OBJECT, { quiet: true });
+      var raw = got.rep.value;
+      if (raw && typeof raw === 'object') return raw;
+      if (got.rep.valuetransferencoding === 'base64') raw = b64text(raw);
+      var m = JSON.parse(raw); return (m && typeof m === 'object') ? m : null;
+    } catch (e) { return null; }
+  }
+  // A predicate (name, mimetype) -> boolean over a set of filetypes entries: true when the extension or media type is
+  // one this set registers (a trailing "*" in a media type is a prefix wildcard). Used to restrict an app's Open dialog
+  // to the documents it opens.
+  function typeMatcher(types) {
+    var exts = {}, mimes = {}, wilds = [];
+    (types || []).forEach(function (t) {
+      (t.extensions || []).forEach(function (e) { exts[String(e).toLowerCase()] = 1; });
+      (t.mimetypes || []).forEach(function (m) { m = String(m).toLowerCase(); if (/\*$/.test(m)) wilds.push(m.replace(/\*$/, '')); else mimes[m] = 1; });
+    });
+    return function (name, mime) {
+      var mx = String(name || '').match(/\.([^./?#]+)[?#]?$/), ext = mx ? mx[1].toLowerCase() : '';
+      if (ext && exts[ext]) return true;
+      if (mime) { mime = String(mime).toLowerCase().replace(/;.*$/, ''); if (mimes[mime]) return true; for (var i = 0; i < wilds.length; i++) if (wilds[i] && mime.indexOf(wilds[i]) === 0) return true; }
+      return false;
+    };
+  }
+  function regIndex(map, key, entry) { if (!key) return; key = String(key).toLowerCase(); (map[key] = map[key] || []).push(entry); }
+  // The apps that declare a given document type (media type or ".ext"), for resolveApp({type}) and apps({type}).
+  function appsForType(reg, type) {
+    var t = String(type || '').toLowerCase(), ext = t.replace(/^\./, '');
+    return reg.apps.filter(function (a) {
+      return (a.types || []).some(function (ty) {
+        return (ty.mimetypes || []).some(function (m) { return String(m).toLowerCase() === t; })
+            || (ty.extensions || []).some(function (x) { return String(x).toLowerCase() === ext; });
+      });
+    });
+  }
+  // Collision rule (docs/app-compatibility.md): a 'prefer'red container wins if registered; then an app in the user's
+  // home beats one at a system path; then the higher version; then registry order (a stable sort preserves it).
+  function pickApp(cands, opts) {
+    if (!cands || !cands.length) return null;
+    if (cands.length === 1) return cands[0];
+    var prefer = opts && opts.prefer ? stripQuery(String(opts.prefer)).replace(/\/$/, '') : null;
+    if (prefer) { var p = cands.filter(function (c) { return stripQuery(c.uri).replace(/\/$/, '') === prefer; })[0]; if (p) return p; }
+    return cands.slice().sort(function (a, b) {
+      if (!!b.home !== !!a.home) return b.home ? 1 : -1;
+      return cmpVer(b.version || '0', a.version || '0');
+    })[0];
+  }
+  function appRecord(e) { return e ? { name: e.name, uuid: e.uuid, version: e.version, versionUuid: e.versionUuid, builtAgainst: e.builtAgainst, lowestSupported: e.lowestSupported, uri: e.uri, home: !!e.home, types: e.types || [] } : null; }
+  // Candidates for a selector: a string tried as name -> uuid -> folder name; or { name } / { uuid } / { short } / { type }.
+  function resolveCandidates(selector) {
+    if (selector && typeof selector === 'object') {
+      if (selector.type) return appsForType(APPREG, selector.type);
+      if (selector.uuid) return APPREG.byUuid[String(selector.uuid).toLowerCase()] || [];
+      if (selector.name) return APPREG.byName[String(selector.name).toLowerCase()] || [];
+      if (selector.short) return APPREG.byShort[String(selector.short).toLowerCase()] || [];
+      return [];
+    }
+    var k = String(selector == null ? '' : selector).toLowerCase();
+    return APPREG.byName[k] || APPREG.byUuid[k] || APPREG.byShort[k] || [];
+  }
+  function selectorLabel(selector) {
+    if (selector && typeof selector === 'object') return selector.type ? ('type ' + selector.type) : (selector.name || selector.uuid || selector.short || 'that application');
+    return String(selector);
+  }
   function claimType(reg, appURI, t) {
     var spec = iconSpecFor(appURI, t.icon);
     (t.extensions || []).forEach(function (e) { e = String(e).toLowerCase(); if (!reg.byExt[e]) reg.byExt[e] = { app: appURI, icon: spec }; });
@@ -4473,7 +4660,7 @@
       else if (!reg.byMime[m]) reg.byMime[m] = { app: appURI, icon: spec }; });
   }
   async function loadAppRegistry(homeBase) {
-    var reg = { ready: false, byExt: {}, byMime: {}, wild: [], apps: [] };
+    var reg = { ready: false, byExt: {}, byMime: {}, wild: [], apps: [], byName: {}, byUuid: {}, byShort: {} };
     var cfg = null;
     try {
       var got = await getRep(homeBase + CFG.prefsDir + 'apps.json?value', T_OBJECT, { quiet: true });
@@ -4487,7 +4674,19 @@
     for (var i = 0; i < cfg.apps.length; i++) {
       var rel = cfg.apps[i], appURI = appURIof(homeBase, rel);
       var types = await readFiletypes(appURI);
-      reg.apps.push({ uri: appURI, rel: rel, name: String(rel).replace(/\/$/, '').split('/').pop(), types: types || [] });
+      var m = (await readManifest(appURI)) || {};
+      var short = String(rel).replace(/\/$/, '').split('/').pop();
+      function str(v) { return typeof v === 'string' && v ? v : null; }
+      var entry = { uri: appURI, rel: rel, short: short,
+        name: str(m.name) || short,                                      // the reverse-DNS identity, else the folder name
+        uuid: str(m.uuid), version: str(m.version), versionUuid: str(m.versionUuid),
+        builtAgainst: str(m.builtAgainst), lowestSupported: str(m.lowestSupported),
+        home: !!(homeBase && appURI.indexOf(homeBase) === 0),            // an app under the user's home beats a system one on a name clash
+        types: types || [] };
+      reg.apps.push(entry);
+      regIndex(reg.byName, entry.name, entry);
+      regIndex(reg.byShort, short, entry);
+      if (entry.uuid) regIndex(reg.byUuid, entry.uuid, entry);
       (types || []).forEach(function (t) { claimType(reg, appURI, t); });
     }
     var links = cfg.links || {};                                        // key (".ext" or a media type, optionally "type/*") -> app path
@@ -4504,6 +4703,7 @@
       else reg.byMime[kl] = { app: appURI, icon: spec };
     });
     reg.ready = true; APPREG = reg;
+    if (appRegResolve) { appRegResolve(); appRegResolve = null; }         // release anything awaiting the first registry load
   }
   function regMatch(path, mimetype) {
     if (!APPREG.ready) return null;
@@ -4871,7 +5071,7 @@
           if (kindCell && g.rep.mimetype && c.kind !== 'container') kindCell.textContent = g.rep.mimetype;
         }, function () { /* leave the dash */ });
       });
-      var isApp = false, expImp = null;      // whether this child defines exports/imports, once known
+      var isApp = false, isDoc = false, expImp = null;      // whether this child is an app / a container-document / defines exports/imports, once known
       function markExpImp(info) {
         expImp = info; var b = badgeFor(info); if (!b || picWrap.querySelector('.fv-badge')) return;
         picWrap.appendChild(h('span', { class: 'fv-badge ' + b.cls, html: arrowSvg(b.cls), title: b.tip }));
@@ -4884,6 +5084,18 @@
       function becomeApp() {
         isApp = true; pic.innerHTML = icon('app', px); if (kindCell) kindCell.textContent = 'Application';
         loadIcon(url).then(function (src) { if (src && pic.isConnected) { pic.textContent = ''; pic.appendChild(iconImg(src, px)); } });
+      }
+      // A container-document: show it as a document (not a folder), with its creator app's icon when that app is
+      // installed. Double-clicking it opens it in that app (openContainer routes a doc-container to its creator).
+      function becomeDoc() {
+        if (isApp) return;
+        isDoc = true; pic.innerHTML = icon('object', px); if (kindCell) kindCell.textContent = 'Document';
+        if (sink.length < CFG.probeLimit) sink.push(function () {
+          return probeDocContainer(url).then(function (info) {
+            if (!info || !info.app) return;
+            return resolveAppByUuid(info.app).then(function (ap) { return ap && loadIcon(ap).then(function (src) { if (src && pic.isConnected && isDoc) { pic.textContent = ''; pic.appendChild(iconImg(src, px)); } }); });
+          }, function () {});
+        });
       }
       // Any container may carry its own icon (index.svg preferred, else index.png), whether or not it is an application.
       function showCustomIcon() { return loadIcon(url).then(function (src) { if (src && pic.isConnected && !isApp) { pic.textContent = ''; pic.appendChild(iconImg(src, px)); } }); }
@@ -4932,8 +5144,9 @@
         if (c.inside) {                                   // the extended listing already said what this child holds
           appCache[url] = c.inside.indexOf(CFG.appEntry) >= 0; iconKnown[url] = pickIcon(c.inside);
           if (appCache[url]) becomeApp();
+          else if (c.inside.indexOf(CFG.docMarker) >= 0) becomeDoc();   // holds creator.json (and no index.js): a container-document
           else if (iconKnown[url]) showCustomIcon();       // a plain container with its own index.svg/png icon
-        } else if (sink.length < CFG.probeLimit) sink.push(function () { return probeApp(url).then(function (yes) { return yes ? becomeApp() : showCustomIcon(); }); });
+        } else if (sink.length < CFG.probeLimit) sink.push(function () { return probeApp(url).then(function (yes) { return yes ? becomeApp() : probeDocContainer(url).then(function (doc) { return doc ? becomeDoc() : showCustomIcon(); }); }); });
         // The exports/imports fields are not carried by a listing, so each container child is read once to find whether it
         // defines either. The badge is shown in icon view only; the list view does not carry it.
         if (!asList && sink.length < CFG.probeLimit) sink.push(function () { return probeExpImp(url).then(markExpImp); });
@@ -5070,7 +5283,8 @@
         return { mime: (res.headers.get('content-type') || '').split(';')[0] || 'application/octet-stream', base64: btoa(str) };
       } catch (e) { return null; }
     },
-    loadRsrc: function (forkURL) { return loadRsrcFork(forkURL); },   // an app's resource fork, parsed and cached (rsrc/)
+    loadRsrc: function (forkURL) { return loadRsrcFork(forkURL); },   // an app's resource fork, parsed and revalidated per launch (rsrc/)
+    reloadRsrc: function (forkURL) { return reloadRsrcFork(forkURL); },   // drop and reload a fork now (installers, panels, tests)
     home: function () { var d = homeDisk(); return d ? d.base : null; },
     mount: function (base, name) {                              // mount a namespace base URI as a disk (namespaces, servers, connect dialog)
       base = stripQuery(String(base || '')); if (!/\/$/.test(base)) base += '/';
@@ -5091,6 +5305,30 @@
     mcpEndpoint: function () {                                  // the CDMI over MCP endpoint URI the server advertises (cdmi_mcp_uri), or null
       var uri = CD.caps && CD.caps.cdmi_mcp_uri;
       return typeof uri === 'string' && uri ? uri : null;
+    },
+    /* Resolve a registered application to its record (record.uri is its container path), or null. The selector is a
+       name ("net.cvwm.vwrite" or the app's folder name), a uuid, or an object { name } / { uuid } / { short } / { type:
+       '<media type>' }. opts.prefer names a container to favour on a clash. Awaits the registry, so it never answers
+       null merely because the registry is still loading (see docs/app-compatibility.md). */
+    resolveApp: async function (selector, opts) {
+      await registryReady();
+      return appRecord(pickApp(resolveCandidates(selector), opts));
+    },
+    /* Open a document in an application: resolve the selector (as resolveApp), then launch it with documentUri as its
+       start document. Resolves to the launched window; rejects -- with the compatibility-gate message, a read error, or
+       "no application registered" -- so the caller can stay open and show why rather than silently do nothing. */
+    openApp: async function (selector, documentUri, opts) {
+      await registryReady();
+      var rec = appRecord(pickApp(resolveCandidates(selector), opts));
+      if (!rec) throw new Error('No application is registered for ' + selectorLabel(selector) + '.');
+      return await launchApp(rec.uri, { start: documentUri || null, quiet: true });
+    },
+    /* The registered applications, each as a record { name, uuid, version, versionUuid, builtAgainst, lowestSupported,
+       uri, home, types }, for an "Open with..." offer. filter.type keeps only those declaring that document type. */
+    apps: async function (filter) {
+      await registryReady();
+      var list = (filter && filter.type) ? appsForType(APPREG, filter.type) : APPREG.apps;
+      return list.map(appRecord);
     },
     async domainInfo(url) {                                     // one domain object: its representation and child domains
       url = stripQuery(String(url || '')); if (!/\/$/.test(url)) url += '/';
@@ -5212,9 +5450,23 @@
       return { origin: origin, namespaces: out };
     },
     pickObject: function (opts) { return pickObject(opts || {}); },      // a common Open dialog (FVWM styled)
-    pickObjectFor: function (id, opts) {                                  // an app's Open dialog: it inherits the calling app's principal (credential + identity)
+    pickObjectFor: async function (id, opts) {                            // an app's Open dialog: it inherits the calling app's principal (credential + identity)
       var w = apps[id]; opts = opts || {};
       if (w && w.principal) { if (!('auth' in opts)) opts.auth = w.principal.auth; if (!('principal' in opts)) opts.principal = w.principal; }
+      // By default, restrict an app's Open dialog to the document types it registered (rsrc/filetypes.json): only those
+      // objects and matching container-documents are selectable. An app that registers no types (a utility, a control
+      // panel) is left unfiltered, so picking an arbitrary object or an app container still works. opts.filter (a legacy
+      // caller predicate) and opts.allTypes both opt out.
+      if (opts.mode !== 'save' && !opts.filter && !opts.allTypes && !opts._typeMatch && w && w.containerURI) {
+        try {
+          var types = await readFiletypes(w.containerURI);
+          if (types && types.length) {
+            opts._typeMatch = typeMatcher(types);
+            var mani = await readManifest(w.containerURI);
+            opts._selfUuid = (mani && mani.uuid) ? String(mani.uuid).toLowerCase() : null;
+          }
+        } catch (e) { /* unreadable: leave the dialog unfiltered */ }
+      }
       return pickObject(opts);
     },
     iconSvg: function (name, size) { return ICONS[name] ? svg(ICONS[name], size || 20) : null; },   // a built-in icon's SVG markup, for the Apps panel

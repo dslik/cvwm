@@ -29,7 +29,7 @@ TESTS = sorted(d for d in os.listdir(_TESTS_DIR) if os.path.isdir(os.path.join(_
 # Applications are serialized from apps/ on the fly and deserialized in one request, so apps/ is the only stored copy
 # (no checked-in .cdmi to drift from it). The serialization logic is shared with tools/package-app.py and update-cvwm.py.
 sys.path.insert(0, os.path.join(HERE, "tools"))
-from cdmi_serialize import serialize
+from cdmi_serialize import serialize, derive_version_uuid
 
 
 def cvwm_version():
@@ -206,11 +206,25 @@ def main():
             else:
                 put(base + app + "/rsrc/", "application/cdmi-container", {"metadata": {}}, headers, context)
             # Stamp the desktop like every other app so it passes the compatibility gate (appCompat reads
-            # rsrc/manifest.json builtAgainst). The desktop is written file-by-file, not serialized, so the
-            # serializer's stamp never runs for it -- write the manifest here, with this package's version.
+            # rsrc/manifest.json builtAgainst). The system fork is serialized above, so its authored manifest
+            # (name/uuid/version) is already in place -- MERGE builtAgainst and a derived versionUuid into it
+            # here, matching what the serializer's _stamp_manifest does for every other app.
+            manifest = {}
+            mf_src = os.path.join(sys_src, "manifest.json") if os.path.isdir(sys_src) else None
+            if mf_src and os.path.isfile(mf_src):
+                try:
+                    manifest = json.loads(open(mf_src).read())
+                    if not isinstance(manifest, dict):
+                        manifest = {}
+                except Exception:
+                    manifest = {}
+            manifest["builtAgainst"] = built
+            vu = derive_version_uuid(manifest.get("uuid"), manifest.get("version"))
+            if vu:
+                manifest["versionUuid"] = vu
             put(base + app + "/rsrc/manifest.json", "application/cdmi-object",
                 {"mimetype": "application/json", "metadata": {}, "valuetransferencoding": "utf-8",
-                 "value": json.dumps({"builtAgainst": built}, indent=2)}, headers, context)
+                 "value": json.dumps(manifest, indent=2)}, headers, context)
     print("Done. Reload the desktop, or choose Rescan namespaces from its root menu.")
 
 

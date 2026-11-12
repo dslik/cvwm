@@ -22,27 +22,37 @@
           noApps: 'No apps. Use Add app… to register one.', noTypes: 'No file types.',
           typeOne: '{n} type', typeMany: '{n} types', none: '—',
           pick: 'Choose an application container', signIn: 'Sign in to manage applications.',
-          scanning: 'Scanning your home…', discNone: 'No new applications found.', discOne: 'Added 1 application.', discMany: 'Added {n} applications.' },
+          scanning: 'Scanning your home…', discNone: 'No new applications found.', discOne: 'Added 1 application.', discMany: 'Added {n} applications.',
+          dup: 'Duplicate — the copy in your home is used instead', dupSys: 'Duplicate — another registered copy is used instead', noVer: 'no version',
+          cantAdd: 'That application registers no document types, so it cannot be added here.' },
     es: { title: 'Aplicaciones', applications: 'Aplicaciones', add: 'Añadir app…', remove: 'Quitar', discover: 'Descubrir',
           noApps: 'No hay aplicaciones. Usa Añadir app… para registrar una.', noTypes: 'No hay tipos de archivo.',
           typeOne: '{n} tipo', typeMany: '{n} tipos', none: '—',
           pick: 'Elige un contenedor de aplicación', signIn: 'Inicia sesión para gestionar las aplicaciones.',
-          scanning: 'Explorando tu carpeta personal…', discNone: 'No se encontraron aplicaciones nuevas.', discOne: 'Se añadió 1 aplicación.', discMany: 'Se añadieron {n} aplicaciones.' },
+          scanning: 'Explorando tu carpeta personal…', discNone: 'No se encontraron aplicaciones nuevas.', discOne: 'Se añadió 1 aplicación.', discMany: 'Se añadieron {n} aplicaciones.',
+          dup: 'Duplicado — se usa la copia de tu carpeta personal', dupSys: 'Duplicado — se usa otra copia registrada', noVer: 'sin versión',
+          cantAdd: 'Esa aplicación no registra ningún tipo de documento, por lo que no se puede añadir aquí.' },
     fr: { title: 'Applications', applications: 'Applications', add: 'Ajouter une app…', remove: 'Retirer', discover: 'Découvrir',
           noApps: 'Aucune application. Utilisez Ajouter une app… pour en enregistrer une.', noTypes: 'Aucun type de fichier.',
           typeOne: '{n} type', typeMany: '{n} types', none: '—',
           pick: 'Choisissez un conteneur d’application', signIn: 'Connectez-vous pour gérer les applications.',
-          scanning: 'Analyse de votre dossier personnel…', discNone: 'Aucune nouvelle application trouvée.', discOne: '1 application ajoutée.', discMany: '{n} applications ajoutées.' },
+          scanning: 'Analyse de votre dossier personnel…', discNone: 'Aucune nouvelle application trouvée.', discOne: '1 application ajoutée.', discMany: '{n} applications ajoutées.',
+          dup: 'Doublon — la copie de votre dossier personnel est utilisée', dupSys: 'Doublon — une autre copie enregistrée est utilisée', noVer: 'sans version',
+          cantAdd: 'Cette application n’enregistre aucun type de document ; elle ne peut pas être ajoutée ici.' },
     hi: { title: 'ऐप्स', applications: 'ऐप्लिकेशन', add: 'ऐप जोड़ें…', remove: 'हटाएँ', discover: 'खोजें',
           noApps: 'कोई ऐप नहीं। पंजीकृत करने के लिए ऐप जोड़ें… का उपयोग करें।', noTypes: 'कोई फ़ाइल प्रकार नहीं।',
           typeOne: '{n} प्रकार', typeMany: '{n} प्रकार', none: '—',
           pick: 'एक ऐप्लिकेशन कंटेनर चुनें', signIn: 'ऐप्लिकेशन प्रबंधित करने के लिए साइन इन करें।',
-          scanning: 'आपका होम स्कैन किया जा रहा है…', discNone: 'कोई नई ऐप्लिकेशन नहीं मिली।', discOne: '1 ऐप्लिकेशन जोड़ी गई।', discMany: '{n} ऐप्लिकेशन जोड़ी गईं।' },
+          scanning: 'आपका होम स्कैन किया जा रहा है…', discNone: 'कोई नई ऐप्लिकेशन नहीं मिली।', discOne: '1 ऐप्लिकेशन जोड़ी गई।', discMany: '{n} ऐप्लिकेशन जोड़ी गईं।',
+          dup: 'डुप्लिकेट — इसके बजाय आपके होम की प्रति उपयोग होती है', dupSys: 'डुप्लिकेट — इसके बजाय दूसरी पंजीकृत प्रति उपयोग होती है', noVer: 'कोई संस्करण नहीं',
+          cantAdd: 'वह ऐप्लिकेशन कोई दस्तावेज़ प्रकार पंजीकृत नहीं करती, इसलिए इसे यहाँ नहीं जोड़ा जा सकता।' },
     zh: { title: '应用', applications: '应用程序', add: '添加应用…', remove: '移除', discover: '发现',
           noApps: '没有应用。使用“添加应用…”来注册一个。', noTypes: '没有文件类型。',
           typeOne: '{n} 种类型', typeMany: '{n} 种类型', none: '—',
           pick: '选择一个应用程序容器', signIn: '登录以管理应用程序。',
-          scanning: '正在扫描您的主目录…', discNone: '未发现新的应用程序。', discOne: '已添加 1 个应用程序。', discMany: '已添加 {n} 个应用程序。' }
+          scanning: '正在扫描您的主目录…', discNone: '未发现新的应用程序。', discOne: '已添加 1 个应用程序。', discMany: '已添加 {n} 个应用程序。',
+          dup: '重复 — 改用您主目录中的副本', dupSys: '重复 — 改用另一个已注册的副本', noVer: '无版本',
+          cantAdd: '该应用程序未注册任何文档类型，因此无法在此添加。' }
   };
   function baseLang(tag) { return String(tag || 'en').toLowerCase().split('-')[0]; }
   function readLocaleLang() { try { var s = localStorage.getItem('cvwm.locale'); if (s) { var o = JSON.parse(s); if (o && o.language) return o.language; } } catch (e) {} return (c.locale && c.locale.language) || 'en'; }
@@ -68,6 +78,9 @@
     '.tw{width:12px;flex:none;text-align:center;color:var(--dim);font-size:11px}.app>.r.sel .tw{color:#fff}' +
     '.ic{display:inline-flex;align-items:center;justify-content:center;flex:none}.ic svg{display:block}.ic img{display:block;object-fit:contain}' +
     '.r b{font:600 13px var(--sans)}.r .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+    '.r .ver{font:11px var(--mono);color:var(--dim)}.app>.r.sel .ver{color:#cdd}' +
+    '.r .dup{font:10px/1.4 var(--sans);color:#fff;background:var(--hi);border-radius:3px;padding:0 5px;flex:none}' +
+    '.app.shadowed>.r .n b{text-decoration:line-through;color:var(--dim)}.app.shadowed>.r.sel .n b{color:#cdd}' +
     '.r .claims{font:11px var(--mono);color:var(--dim)}.app>.r.sel .claims{color:#cdd}' +
     '.types{background:var(--band);padding:2px 0 5px}' +
     '.type{display:flex;align-items:center;gap:8px;padding:3px 10px 3px 28px;font:12px var(--mono);color:var(--fg)}' +
@@ -104,6 +117,15 @@
     try { var m = await readJSON(uri + 'rsrc/filetypes.json'); if (m && Array.isArray(m.types)) return m.types; } catch (e) { /* none */ }
     return [];
   }
+  // An app's identity: rsrc/manifest.json carries the reverse-DNS name, the stable app uuid, and the version. Two
+  // registered copies with the same uuid are the same application -- the panel flags them as duplicates (see render).
+  async function readIdentity(uri) {
+    try {
+      var m = await readJSON(uri + 'rsrc/manifest.json');
+      if (m && typeof m === 'object') return { name: m.name || null, uuid: m.uuid || null, version: m.version || null };
+    } catch (e) { /* none */ }
+    return { name: null, uuid: null, version: null };
+  }
 
   /* ---- icons: a built-in name via the desktop, or the app's own / a resource icon fetched as a data URL ---- */
   var iconCache = {};
@@ -135,19 +157,57 @@
   /* ---- state ---- */
   var cfg = { version: 1, apps: [], links: {} };
   var manifests = {};     // appURI -> [ {mimetypes, extensions, icon}, ... ]
+  var identities = {};    // appURI -> { name, uuid, version }
+  var shadowed = {};      // app rel -> true when a same-uuid copy elsewhere is preferred (this one is a duplicate)
   var selApp = null;      // selected app rel
   var expanded = {};      // app rel -> bool
+
+  function isHome(uri) { return !!(HOME && String(uri).indexOf(HOME) === 0); }
+  // Numeric dotted compare, matching cvwm's cmpVer so the panel picks the same winner the desktop does.
+  function cmpVer(a, b) {
+    var x = String(a || '0').split('.'), y = String(b || '0').split('.');
+    for (var i = 0; i < Math.max(x.length, y.length); i++) {
+      var p = parseInt(x[i] || '0', 10) || 0, q = parseInt(y[i] || '0', 10) || 0;
+      if (p !== q) return p < q ? -1 : 1;
+    }
+    return 0;
+  }
+  // Resolve duplicate identities: apps sharing a uuid are the same application. The copy in the user's home wins over a
+  // system copy; then the higher version; then registry order (alphabetical) -- the same rule cvwm's pickApp uses. The
+  // losers are marked shadowed so the panel can show which copy the desktop will actually run.
+  function markDuplicates() {
+    shadowed = {};
+    var byUuid = {};
+    cfg.apps.forEach(function (rel) {
+      var id = identities[appURIof(rel)] || {}; if (!id.uuid) return;
+      (byUuid[id.uuid] = byUuid[id.uuid] || []).push(rel);
+    });
+    Object.keys(byUuid).forEach(function (u) {
+      var group = byUuid[u]; if (group.length < 2) return;
+      var winner = group.slice().sort(function (a, b) {
+        var ha = isHome(appURIof(a)), hb = isHome(appURIof(b));
+        if (ha !== hb) return ha ? -1 : 1;                       // home beats system
+        var cv = cmpVer((identities[appURIof(b)] || {}).version, (identities[appURIof(a)] || {}).version);
+        if (cv !== 0) return cv;                                  // then the higher version
+        return byName(a, b);                                      // else first alphabetically
+      })[0];
+      var winURI = appURIof(winner);
+      group.forEach(function (rel) { if (rel !== winner && appURIof(rel) !== winURI) shadowed[rel] = true; });   // same resolved path = same file, not a duplicate
+    });
+  }
 
   function byName(a, b) { var x = appName(a).toLowerCase(), y = appName(b).toLowerCase(); return x < y ? -1 : x > y ? 1 : 0; }
   async function loadAll() {
     try { cfg = await readJSON(HOME + 'prefs/apps.json'); } catch (e) { cfg = { version: 1, apps: [], links: {} }; }
     if (!Array.isArray(cfg.apps)) cfg.apps = []; if (!cfg.links) cfg.links = {};
     cfg.apps.sort(byName);                              // applications are listed in alphabetical order
-    manifests = {};
+    manifests = {}; identities = {};
     for (var i = 0; i < cfg.apps.length; i++) {
       var rel = cfg.apps[i], uri = appURIof(rel);
       manifests[uri] = await readManifest(uri);
+      identities[uri] = await readIdentity(uri);
     }
+    markDuplicates();
   }
   async function save() {
     try {
@@ -179,13 +239,16 @@
     col1.textContent = '';
     if (!cfg.apps.length) { col1.appendChild(mk('div', { class: 'empty', text: tr('noApps') })); return; }
     cfg.apps.forEach(function (rel) {
-      var uri = appURIof(rel), types = manifests[uri] || [], box = mk('div', { class: 'app' });
+      var uri = appURIof(rel), types = manifests[uri] || [], id = identities[uri] || {}, box = mk('div', { class: 'app' + (shadowed[rel] ? ' shadowed' : '') });
       var icSpan = mk('span', { class: 'ic' });
-      var row = mk('div', { class: 'r' + (selApp === rel ? ' sel' : '') }, [
+      var kids = [
         mk('span', { class: 'tw', text: types.length ? (expanded[rel] ? '▾' : '▸') : '' }),
         icSpan, mk('span', { class: 'n' }, [mk('b', { text: appName(rel) })]),
-        mk('span', { class: 'claims', text: claimSummary(types) })
-      ]);
+        mk('span', { class: 'ver', text: id.version ? ('v' + id.version) : tr('noVer') })
+      ];
+      if (shadowed[rel]) kids.push(mk('span', { class: 'dup', text: '✕', title: isHome(uri) ? tr('dupSys') : tr('dup') }));
+      kids.push(mk('span', { class: 'claims', text: claimSummary(types) }));
+      var row = mk('div', { class: 'r' + (selApp === rel ? ' sel' : ''), title: uri }, kids);
       paintIcon(icSpan, uri, undefined, 20);
       row.addEventListener('click', function () { selApp = rel; if (types.length) expanded[rel] = !expanded[rel]; renderApps(); remBtn.disabled = false; });
       box.appendChild(row);
@@ -209,7 +272,12 @@
     var rows = [], seen = {};
     function add(id, icon, uri, rel) {
       var k = id.toLowerCase();
-      if (seen[k]) { if (seen[k].claimants.indexOf(rel) < 0) seen[k].claimants.push(rel); return; }
+      if (seen[k]) {
+        var r0 = seen[k];
+        if (r0.claimants.indexOf(rel) < 0) r0.claimants.push(rel);
+        if (shadowed[r0.owner] && !shadowed[rel]) { r0.owner = rel; r0.uri = uri; r0.icon = icon; }   // a real copy supersedes a shadowed default
+        return;
+      }
       var r = { id: id, icon: icon, uri: uri, owner: rel, claimants: [rel] }; seen[k] = r; rows.push(r);
     }
     cfg.apps.forEach(function (rel) {
@@ -248,12 +316,13 @@
     if (!c.desktop || !c.desktop.pickObject) return;
     c.desktop.pickObject({ title: tr('pick'), startURI: (HOME ? HOME + 'apps/' : c.baseURI) || null,
       filter: function (name) { return /\/$/.test(name); } })
-      .then(function (url) {
+      .then(async function (url) {
         if (!url) return;
         if (!/\/$/.test(url)) url += '/';
-        var rel = (HOME && url.indexOf(HOME) === 0) ? url.slice(HOME.length) : url;    // store home-relative where possible
-        if (cfg.apps.indexOf(rel) >= 0) return;
-        cfg.apps.push(rel); selApp = rel; expanded[rel] = true;
+        var key = url.replace(/\/$/, '');
+        if (cfg.apps.some(function (rel) { return appURIof(rel).replace(/\/$/, '') === key; })) return;   // already registered (by resolved path)
+        if (!(await readManifest(url)).length) { setFootMsg(tr('cantAdd')); return; }   // only apps that register document types belong here
+        cfg.apps.push(url); selApp = url; expanded[url] = true;        // the registry records each app by its full path
         save().then(loadAll).then(renderAll);
       });
   });
@@ -265,7 +334,7 @@
   });
 
   /* ---- discover: walk the home for application containers (any container holding index.js) and register the ones not
-     already listed. Home-relative paths with a trailing slash are stored, matching what Add app… records. ---- */
+     already listed. Full paths with a trailing slash are stored, matching what Add app… records. ---- */
   var SKIP = { 'prefs/': 1, 'rsrc/': 1, 'control_panels/': 1, 'trash/': 1, '.trash/': 1 };   // config, resource forks, panels, trash
   async function listChildren(uri) {
     var res = await fetch(uri + '?children', { headers: headers({ Accept: 'application/cdmi-container' }) });
@@ -280,7 +349,10 @@
       var kids; try { kids = await listChildren(uri); } catch (e) { return; }
       if (kids === null) return;
       budget.n++;
-      if (kids.indexOf('index.js') >= 0) { found.push(rel); return; }   // an application; do not descend into it (rsrc/, etc.)
+      if (kids.indexOf('index.js') >= 0) {                              // an application; do not descend into it (rsrc/, etc.)
+        if ((await readManifest(uri)).length) found.push(uri);         // ...and register it only if it registers document types
+        return;
+      }
       for (var i = 0; i < kids.length; i++) {
         var name = kids[i];
         if (!/\/$/.test(name)) continue;                           // containers only
@@ -294,8 +366,9 @@
   discoverBtn.addEventListener('click', function () {
     discoverBtn.disabled = true; addBtn.disabled = true; setFootMsg(tr('scanning'));
     discover().then(function (found) {
-      var added = 0;
-      found.forEach(function (rel) { if (cfg.apps.indexOf(rel) < 0) { cfg.apps.push(rel); added++; } });
+      var added = 0, have = {};
+      cfg.apps.forEach(function (rel) { have[appURIof(rel).replace(/\/$/, '')] = 1; });   // compare by resolved path, so a full-path find does not re-add a relative seed
+      found.forEach(function (uri) { var key = appURIof(uri).replace(/\/$/, ''); if (!have[key]) { have[key] = 1; cfg.apps.push(uri); added++; } });
       discoverBtn.disabled = false; addBtn.disabled = false;
       if (!added) { setFootMsg(tr('discNone')); return; }
       setFootMsg((added === 1 ? tr('discOne') : tr('discMany')).replace('{n}', added));

@@ -1,3 +1,3 @@
 { "types": [
-  { "mimetypes": ["text/html", "application/xhtml+xml"], "extensions": ["html", "htm", "xhtml", "url"], "icon": "script" }
+  { "mimetypes": ["text/html", "application/xhtml+xml"], "extensions": ["html", "htm", "xhtml", "url"], "icon": "icons/html.svg" }
 ] }

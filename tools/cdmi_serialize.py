@@ -18,7 +18,7 @@ id -- the name without the extension -- so an app can address "en" or "en.json".
 
 Uses nothing outside the Python standard library.
 """
-import base64, json, mimetypes, os
+import base64, json, mimetypes, os, uuid
 
 CONTAINER = "application/cdmi-container"
 OBJECT = "application/cdmi-object"
@@ -43,22 +43,49 @@ def data_object(path, obj_name):
     return node
 
 
-def manifest_object(built_against):
-    """The rsrc/manifest.json the desktop gates on: it records the cvwm version this app was built against."""
-    value = json.dumps({"builtAgainst": built_against}, indent=2)
+# A fixed namespace so a release's versionUuid is a stable function of (app uuid, version) -- the same app at the same
+# version derives the same versionUuid on every build, on any machine.
+_VERSION_NS = uuid.UUID("b6c3f1e2-7a4d-5c8b-9e0f-1a2b3c4d5e6f")
+
+
+def derive_version_uuid(app_uuid, version):
+    """versionUuid = UUIDv5(app uuid + version): automatic, stable per release, so an author cannot forget to bump it."""
+    if not app_uuid or not version:
+        return None
+    return str(uuid.uuid5(_VERSION_NS, "%s:%s" % (app_uuid, version)))
+
+
+def manifest_object(data):
+    """The rsrc/manifest.json CDMI object from a manifest dict (authored identity plus the stamped gate versions)."""
+    value = json.dumps(data, indent=2)
     return {"objectType": OBJECT, "objectName": "manifest.json", "completionStatus": "Complete", "metadata": {},
             "mimetype": "application/json", "valuetransferencoding": "utf-8", "value": value}
 
 
 def _stamp_manifest(children, built_against):
-    """Put manifest.json into an app's rsrc/ fork (creating the fork if the app has none), replacing any existing one."""
+    """Stamp the app's rsrc/manifest.json: MERGE builtAgainst (and a derived versionUuid) into whatever the author
+    declared (name/uuid/version/lowestSupported), rather than replacing it -- so the identity survives deployment. The
+    rsrc/ fork is created if the app has none."""
     rsrc = next((c for c in children if c.get("objectName") == "rsrc/"), None)
     if rsrc is None:
         rsrc = {"objectType": CONTAINER, "objectName": "rsrc/", "completionStatus": "Complete", "metadata": {},
                 "children": [], "childrenrange": ""}
         children.append(rsrc)
+    existing = next((c for c in rsrc["children"] if c.get("objectName") == "manifest.json"), None)
+    data = {}
+    if existing is not None:
+        try:
+            data = json.loads(existing.get("value") or "{}")
+            if not isinstance(data, dict):
+                data = {}
+        except Exception:
+            data = {}
+    data["builtAgainst"] = built_against
+    vu = derive_version_uuid(data.get("uuid"), data.get("version"))
+    if vu:
+        data["versionUuid"] = vu
     kids = [c for c in rsrc["children"] if c.get("objectName") != "manifest.json"]
-    kids.append(manifest_object(built_against))
+    kids.append(manifest_object(data))
     rsrc["children"] = kids
     rsrc["childrenrange"] = "0-%d" % (len(kids) - 1)
 

@@ -1,5 +1,13 @@
 { "types": [
-  { "mimetypes": ["application/json", "application/xml", "application/javascript"], "extensions": ["js", "mjs", "json", "xml", "css", "sh", "py"], "icon": "script" },
-  { "mimetypes": ["text/markdown"], "extensions": ["md", "markdown", "mdown", "mkd"], "icon": "object" },
-  { "mimetypes": ["text/plain", "text/*"], "extensions": ["txt", "text", "log", "csv", "tsv", "ini", "conf", "cfg", "yaml", "yml"], "icon": "object" }
+  { "mimetypes": ["application/javascript", "text/javascript"], "extensions": ["js", "mjs"], "icon": "icons/js.svg" },
+  { "mimetypes": ["application/json"], "extensions": ["json"], "icon": "icons/json.svg" },
+  { "mimetypes": ["application/xml", "text/xml"], "extensions": ["xml"], "icon": "icons/xml.svg" },
+  { "mimetypes": ["text/css"], "extensions": ["css"], "icon": "icons/css.svg" },
+  { "mimetypes": ["application/x-sh", "text/x-shellscript"], "extensions": ["sh"], "icon": "icons/sh.svg" },
+  { "mimetypes": ["text/x-python", "application/x-python"], "extensions": ["py"], "icon": "icons/py.svg" },
+  { "mimetypes": ["text/markdown"], "extensions": ["md", "markdown", "mdown", "mkd"], "icon": "icons/md.svg" },
+  { "mimetypes": ["text/csv", "text/tab-separated-values"], "extensions": ["csv", "tsv"], "icon": "icons/csv.svg" },
+  { "mimetypes": ["application/yaml", "text/yaml", "text/x-yaml"], "extensions": ["yaml", "yml"], "icon": "icons/yaml.svg" },
+  { "mimetypes": [], "extensions": ["ini", "conf", "cfg"], "icon": "icons/ini.svg" },
+  { "mimetypes": ["text/plain", "text/*"], "extensions": ["txt", "text", "log"], "icon": "icons/txt.svg" }
 ] }
